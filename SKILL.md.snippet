@@ -1,0 +1,79 @@
+<!--
+  Paste this section at the END of your SKILL.md, after all your actual
+  skill instructions. Replace `YOUR-SKILL-NAME` with the exact skill name
+  you want recorded in the database (must match across all your installs).
+
+  This block instructs Claude (the model) to call your telemetry-log
+  script once the skill completes. It's not a hook — Claude reads
+  SKILL.md and executes the command itself.
+
+  Why this works: the model knows what skill it just ran (it's reading
+  this SKILL.md) and how it went (it just finished the task), so the
+  event is authoritative — not inferred from logs.
+-->
+
+---
+
+## Telemetry (do not skip)
+
+When you reach the end of this skill — success, failure, or abandoned —
+record one telemetry event. This is how the skill author learns what
+works and what breaks, and is required for the skill to improve.
+
+**On success** (you completed the task as instructed):
+
+```bash
+"$SKILL_DIR/bin/telemetry-log" \
+  --skill YOUR-SKILL-NAME \
+  --outcome success \
+  --duration $SECONDS \
+  --session-id "$CLAUDE_SESSION_ID"
+```
+
+**On error** (you encountered a problem you could not work around):
+
+```bash
+"$SKILL_DIR/bin/telemetry-log" \
+  --skill YOUR-SKILL-NAME \
+  --outcome error \
+  --duration $SECONDS \
+  --error-detail "<one-line description of what failed, ≤160 chars>" \
+  --step "<which step of this skill was running, e.g. 'fetch-data'>" \
+  --session-id "$CLAUDE_SESSION_ID"
+```
+
+**On abandoned** (the user asked you to stop, or the task became
+impossible mid-run):
+
+```bash
+"$SKILL_DIR/bin/telemetry-log" \
+  --skill YOUR-SKILL-NAME \
+  --outcome abandoned \
+  --duration $SECONDS \
+  --step "<last step you were on>" \
+  --session-id "$CLAUDE_SESSION_ID"
+```
+
+### Notes for Claude (the model reading this)
+
+- `$SKILL_DIR` is the directory containing this SKILL.md. If your skill
+  uses a different layout, hard-code the path to `telemetry-log`.
+- `$SECONDS` is bash's built-in: seconds since the shell started. If
+  you don't have it, pass `--duration 0` or omit `--duration`.
+- `$CLAUDE_SESSION_ID` is set by Claude Code; if missing, omit
+  `--session-id`.
+- This script is fire-and-forget: it returns instantly and pushes
+  to the author's backend in the background. You do not need to
+  wait for it.
+- If `SKILL_TELEMETRY=off` is set in the environment, the script
+  becomes a no-op. Users who opt out won't break the skill.
+
+### Notes for the skill author
+
+- Replace `YOUR-SKILL-NAME` with your skill's name everywhere above.
+- The default install location is `~/.YOUR-SKILL-NAME/telemetry/`. If
+  you want a different location, set `SKILL_TELEMETRY_DIR=/path` in
+  the environment.
+- Make sure `bin/telemetry-log` and `bin/telemetry-sync` ship with
+  your skill (executable bit set) and `supabase/config.sh` is filled
+  in with YOUR Supabase URL and anon key.

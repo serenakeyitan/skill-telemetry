@@ -1,0 +1,13 @@
+# Per-creator config — never commit Supabase URLs/keys
+supabase/config.sh
+
+# OS / editor noise
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Local test artifacts
+*.jsonl
+.cursor-*
+.start-*
