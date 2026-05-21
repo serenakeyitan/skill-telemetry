@@ -12,18 +12,47 @@
 #                 [--step <step-name>] [--session-id <id>]
 #
 # Env:
-#   SKILL_TELEMETRY=off          — disables ALL writing and sync (default: on)
+#   SKILL_TELEMETRY=off          — disables ALL writing and sync (overrides everything)
+#   SKILL_TELEMETRY=anonymous    — sends events but strips installation_id
+#   SKILL_TELEMETRY=on           — sends everything (default)
 #   SKILL_TELEMETRY_DIR          — override state dir (default: ~/.<skill>)
 #   SKILL_TELEMETRY_BIN          — override bin dir (default: dir of this script)
+#
+# Persistent mode (~/.<skill>/.telemetry-mode) is read if env var not set.
+# Written by the preamble in the host skill's SKILL.md on first run.
 #
 # Failure mode: never exits non-zero. Telemetry must not break the skill.
 
 set -uo pipefail
 
-# ─── Master kill switch ──────────────────────────────────────
-if [ "${SKILL_TELEMETRY:-on}" = "off" ]; then
-  exit 0
+# ─── Determine effective mode (env > persisted > default) ────
+# We need $SKILL to find the persisted config, but $SKILL comes from args.
+# So peek at args first just to extract --skill, then resolve mode.
+PEEK_SKILL=""
+for ((i=1; i<=$#; i++)); do
+  if [ "${!i:-}" = "--skill" ]; then
+    next=$((i + 1))
+    PEEK_SKILL="${!next:-}"
+    break
+  fi
+done
+
+if [ -n "${SKILL_TELEMETRY:-}" ]; then
+  MODE="$SKILL_TELEMETRY"
+elif [ -n "$PEEK_SKILL" ] && [ -f "$HOME/.${PEEK_SKILL}/.telemetry-mode" ]; then
+  MODE="$(cat "$HOME/.${PEEK_SKILL}/.telemetry-mode" 2>/dev/null | tr -d ' \n\r')"
+else
+  MODE="on"
 fi
+
+# Validate mode
+case "$MODE" in
+  on|anonymous|off) ;;
+  *) MODE="on" ;;
+esac
+
+# Master kill switch
+[ "$MODE" = "off" ] && exit 0
 
 # ─── Parse args ──────────────────────────────────────────────
 SKILL=""
@@ -81,6 +110,13 @@ if [ ! -f "$ID_FILE" ]; then
 fi
 INSTALL_ID="$(cat "$ID_FILE" 2>/dev/null || echo unknown)"
 
+# ─── Anonymous mode: strip the installation ID ───────────────
+# We still send the event (counts matter), but the author can't tell
+# different users apart. This is the user's chosen middle ground.
+if [ "$MODE" = "anonymous" ]; then
+  INSTALL_ID=""
+fi
+
 # ─── Timestamp ───────────────────────────────────────────────
 TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
@@ -120,9 +156,13 @@ STEP_JSON="null"
 SESSION_JSON="null"
 [ -n "$SESSION_ESC" ] && SESSION_JSON="\"$SESSION_ESC\""
 
+# installation_id: "" → null (anonymous mode), else the UUID
+INSTALL_JSON="null"
+[ -n "$INSTALL_ID" ] && INSTALL_JSON="\"$INSTALL_ID\""
+
 # ─── Append one JSON line (atomic single-line >> on POSIX) ───
-printf '{"ts":"%s","skill":"%s","outcome":"%s","duration_s":%s,"error_detail":%s,"step":%s,"session_id":%s,"installation_id":"%s"}\n' \
-  "$TS" "$SKILL_ESC" "$OUTCOME" "$DUR_JSON" "$ERROR_JSON" "$STEP_JSON" "$SESSION_JSON" "$INSTALL_ID" \
+printf '{"ts":"%s","skill":"%s","outcome":"%s","duration_s":%s,"error_detail":%s,"step":%s,"session_id":%s,"installation_id":%s}\n' \
+  "$TS" "$SKILL_ESC" "$OUTCOME" "$DUR_JSON" "$ERROR_JSON" "$STEP_JSON" "$SESSION_JSON" "$INSTALL_JSON" \
   >> "$JSONL_FILE" 2>/dev/null || true
 
 # ─── Fire background sync (non-blocking) ─────────────────────
