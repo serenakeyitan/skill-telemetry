@@ -227,6 +227,47 @@ record automatically once your users install the new SKILL.md.
 
 ---
 
+## Updating telemetry across all your skills
+
+When skill-telemetry ships a new release, `bin/skill-telemetry-update`
+pulls the latest bin/ + snippet/ + PRIVACY files and overwrites every
+installed skill's copy in `~/.claude/skills/*/telemetry/`. Idempotent.
+
+```bash
+# Preview what would change
+bin/skill-telemetry-update --dry-run
+
+# Apply (also git pulls source first)
+bin/skill-telemetry-update
+
+# Skip certain skills
+bin/skill-telemetry-update --skip tdoc --skip real-stars
+
+# Only update specific skills
+bin/skill-telemetry-update --include tdoc
+
+# Use a different source dir
+bin/skill-telemetry-update --source /opt/skill-telemetry
+
+# Skip the git pull (use whatever's already in source)
+bin/skill-telemetry-update --no-pull
+```
+
+The script fires a `consent_granted` lifecycle event tagged
+`skill=skill-telemetry` with `step=updated_<N>_skills` so the
+maintainer sees who's running updates and how many skills got
+upgraded. (You can see this in your own pool too — it's per-author.)
+
+What it touches per skill:
+- `telemetry/bin/*` (telemetry-log, telemetry-sync, telemetry-update-check, skill-events)
+- `telemetry/SKILL.md.snippet`
+- `telemetry/PRIVACY.md`
+
+What it preserves:
+- `telemetry/supabase/config.sh` (your per-skill author config)
+- `<skill>/SKILL.md` (host skill — never touched)
+- `<skill>/VERSION`
+
 ## Querying your data
 
 ### From your terminal (local timezone)

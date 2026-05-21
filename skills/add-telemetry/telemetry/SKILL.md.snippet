@@ -1,0 +1,192 @@
+<!-- skill-telemetry snippet. See README.md for placeholder docs. -->
+
+---
+
+## Telemetry preamble (run first, before anything else)
+
+This block runs at the very start of the skill. It does two things:
+
+1. **Consent**: if this is the user's first time running a skill with
+   telemetry, ask them once. Remember their choice forever via a flag
+   file. (Gstack-style.)
+2. **Start sentinel**: write a file with the current epoch so the end
+   block can compute `duration_s` honestly.
+
+```bash
+# Consent + start sentinel
+TEL_HOME="$HOME/.{{SKILL_NAME}}"
+TEL_PROMPTED_FLAG="$TEL_HOME/.telemetry-prompted"
+TEL_CONFIG_FILE="$TEL_HOME/.telemetry-mode"
+
+mkdir -p "$TEL_HOME"
+
+# Read existing choice (if any). Honored in this order:
+#   1. SKILL_TELEMETRY env var (overrides everything; ephemeral opt-out)
+#   2. ~/.{{SKILL_NAME}}/.telemetry-mode (the persistent choice)
+#   3. Default: "on" if prompted-flag exists (legacy installs), else needs prompting
+TEL_MODE_PERSISTED="$(cat "$TEL_CONFIG_FILE" 2>/dev/null | tr -d ' \n\r')"
+TEL_PROMPTED="no"
+[ -f "$TEL_PROMPTED_FLAG" ] && TEL_PROMPTED="yes"
+
+# Effective mode
+if [ -n "${SKILL_TELEMETRY:-}" ]; then
+  TEL_EFFECTIVE="$SKILL_TELEMETRY"     # env var wins
+elif [ -n "$TEL_MODE_PERSISTED" ]; then
+  TEL_EFFECTIVE="$TEL_MODE_PERSISTED"
+else
+  TEL_EFFECTIVE="on"                    # default
+fi
+
+# Determine session ID. Claude Code sets $CLAUDE_SESSION_ID in newer
+# versions; fall back to a stable per-shell ID derived from PID + start
+# epoch so the sentinel is unique per concurrent skill run.
+TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+
+# Write per-session sentinel. Using one global .session-start across
+# concurrent sessions corrupts duration_s when sessions overlap.
+if [ "$TEL_EFFECTIVE" != "off" ]; then
+  mkdir -p "$TEL_HOME/sentinels"
+  date +%s > "$TEL_HOME/sentinels/$TEL_SESSION_ID"
+  # Best-effort: clean up stale sentinels older than 24h
+  find "$TEL_HOME/sentinels" -type f -mtime +1 -delete 2>/dev/null || true
+fi
+
+echo "TEL_PROMPTED: $TEL_PROMPTED"
+echo "TEL_EFFECTIVE: $TEL_EFFECTIVE"
+echo "TEL_SESSION_ID: $TEL_SESSION_ID"
+```
+
+### Instructions for Claude reading this
+
+After running the preamble, look at the echoed values.
+
+**If `TEL_PROMPTED` is `no`** (this is the user's first time running a
+skill with telemetry from this author), call `AskUserQuestion` ONCE
+with these options:
+
+> This skill records when it runs, how it went (success/error/abandoned),
+> how long it took, and a random ID for your machine, and sends it to
+> the skill author's database. It does NOT record your prompts, your
+> files, or anything else. Nothing is sent to Anthropic.
+>
+> What's your preference?
+>
+> A) **Help the author improve the skill** (default — sends events)
+> B) **Off** (nothing leaves your machine)
+>
+> You can change anytime by editing `~/.{{SKILL_NAME}}/.telemetry-mode`
+> or setting `SKILL_TELEMETRY=off` in your shell.
+
+Record their choice:
+
+```bash
+# Replace MODE_FROM_USER with "on" or "off"
+echo "MODE_FROM_USER" > "$TEL_CONFIG_FILE"
+touch "$TEL_PROMPTED_FLAG"
+# Re-load effective mode for this session
+TEL_EFFECTIVE="$(cat "$TEL_CONFIG_FILE")"
+```
+
+**If `TEL_PROMPTED` is `yes`**, do NOT ask again — proceed silently with
+the persisted choice. The user gave you their answer once; respect it.
+
+### Notes on the consent model
+
+- We default to **prompting on first run** (not silent default-on). This
+  is the honest version of "default-on": tell users plainly, give them
+  two real options, then never bother them again.
+- The flag file lives in `~/.{{SKILL_NAME}}/`, namespaced per skill.
+  If a user installs five skills with telemetry, they get prompted five
+  times (once per author). That's intentional — different authors,
+  different trust decisions.
+
+---
+
+## Telemetry (run last, at end of skill)
+
+When you reach the end of this skill — success, failure, or abandoned —
+record one telemetry event. This is how the skill author learns what
+works and what breaks.
+
+```bash
+# Compute duration from per-session sentinel written in the preamble.
+# TEL_SESSION_ID was set in the preamble and is still in scope IF this
+# end block runs in the same shell. If not (Claude split it across
+# Bash calls), reconstruct the same fallback.
+TEL_HOME="$HOME/.{{SKILL_NAME}}"
+TEL_SESSION_ID="${CLAUDE_SESSION_ID:-${TEL_SESSION_ID:-shell-$$-$(date +%s)}}"
+END=$(date +%s)
+START=$(cat "$TEL_HOME/sentinels/$TEL_SESSION_ID" 2>/dev/null || echo "$END")
+DURATION=$(( END - START ))
+# Clean up the sentinel for THIS session only (don't clobber concurrent
+# sessions). Other sentinels age out via the 24h find in the preamble.
+rm -f "$TEL_HOME/sentinels/$TEL_SESSION_ID"
+
+# Re-read effective mode (in case it changed mid-session)
+TEL_EFFECTIVE="${SKILL_TELEMETRY:-$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null || echo on)}"
+```
+
+If `TEL_EFFECTIVE` is `off`, **stop here** — do not call `telemetry-log`.
+
+Otherwise, call `telemetry-log` based on outcome. **Always include**:
+- `--session-id "$TEL_SESSION_ID"` (lets the author group multiple
+  events from one session if they happen)
+- `--step "<descriptor>"` (which command/feature was being used —
+  e.g. for tdoc: `new`, `edit`, `publish`, `list`, `pull`, `unpublish`,
+  `onboard`. The author uses this to see WHICH feature gets used.)
+
+**On success** (you completed the task as instructed):
+
+```bash
+"{{TELEMETRY_BIN}}" \
+  --skill {{SKILL_NAME}} \
+  --outcome success \
+  --duration "$DURATION" \
+  --step "<command name, e.g. 'new' or 'edit'>" \
+  --session-id "$TEL_SESSION_ID"
+```
+
+**On error** (you encountered a problem you could not work around):
+
+```bash
+"{{TELEMETRY_BIN}}" \
+  --skill {{SKILL_NAME}} \
+  --outcome error \
+  --duration "$DURATION" \
+  --error-detail "<one-line description of what failed, ≤160 chars>" \
+  --step "<which command failed and at what phase>" \
+  --session-id "$TEL_SESSION_ID"
+```
+
+**On abandoned** (the user asked you to stop, or the task became
+impossible mid-run):
+
+```bash
+"{{TELEMETRY_BIN}}" \
+  --skill {{SKILL_NAME}} \
+  --outcome abandoned \
+  --duration "$DURATION" \
+  --step "<last step you were on>" \
+  --session-id "$TEL_SESSION_ID"
+```
+
+### Notes for Claude (the model reading this)
+
+- The path `{{TELEMETRY_BIN}}` is burned in at install time. Do not
+  change it.
+- The script is fire-and-forget: it returns instantly. Do not wait.
+- If `TEL_EFFECTIVE` is `off`, skip the log call entirely. Don't even
+  write the local JSONL.
+- **Never skip the end block unless mode is off.** Even if the skill
+  failed, recording the error is more valuable than nothing.
+
+### Notes for the skill author (if hand-editing)
+
+- `{{SKILL_NAME}}` and `{{TELEMETRY_BIN}}` are placeholders. The
+  `add-telemetry` meta-skill substitutes them automatically.
+- Default install location: `<your-skill-dir>/telemetry/`. Bin path
+  becomes `<your-skill-dir>/telemetry/bin/telemetry-log`.
+- Three opt-out paths for users:
+  - On first run: choose "Off" in the consent prompt
+  - Persistent: edit `~/.<skill>/.telemetry-mode` to `off`
+  - Ephemeral: `export SKILL_TELEMETRY=off`

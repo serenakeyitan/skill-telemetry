@@ -1,0 +1,245 @@
+#!/usr/bin/env bash
+# skill-telemetry-update — pull the latest skill-telemetry bin/ + supabase/
+# templates from main and overwrite every installed skill's copy.
+#
+# Scope: any directory matching ~/.claude/skills/*/telemetry/ that looks
+# like a skill-telemetry install (has bin/telemetry-log).
+#
+# What it touches (per installed skill):
+#   telemetry/bin/telemetry-log
+#   telemetry/bin/telemetry-sync
+#   telemetry/bin/telemetry-update-check
+#   telemetry/bin/skill-events
+#   telemetry/SKILL.md.snippet
+#   telemetry/PRIVACY.md
+#
+# What it DOES NOT touch:
+#   telemetry/supabase/config.sh  (per-skill author config — keep)
+#   <skill>/SKILL.md              (host skill instructions — keep)
+#   <skill>/VERSION               (host skill version — keep)
+#
+# Flags:
+#   --source <path>     # override source repo (default: ~/code/skill-telemetry/)
+#   --dry-run           # show what would change, don't write
+#   --skip <name>       # skip a specific skill's telemetry/ (repeatable)
+#   --include <name>    # only update these skill(s) (repeatable)
+#   --no-pull           # skip git pull (use whatever's in source)
+#
+# Exit: 0 on success, non-zero if any update failed.
+
+set -uo pipefail
+
+# ─── Parse flags ─────────────────────────────────────────────
+SRC=""
+DRY_RUN=0
+NO_PULL=0
+SKIP_LIST=""
+INCLUDE_LIST=""
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --source)    SRC="$2"; shift 2 ;;
+    --dry-run)   DRY_RUN=1; shift ;;
+    --skip)      SKIP_LIST="$SKIP_LIST $2"; shift 2 ;;
+    --include)   INCLUDE_LIST="$INCLUDE_LIST $2"; shift 2 ;;
+    --no-pull)   NO_PULL=1; shift ;;
+    -h|--help)
+      head -30 "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+# ─── Locate source ──────────────────────────────────────────
+if [ -z "$SRC" ]; then
+  for cand in \
+    "$HOME/code/skill-telemetry" \
+    "$HOME/.claude/skills/skill-telemetry" \
+    "$HOME/skill-telemetry"; do
+    if [ -f "$cand/bin/telemetry-log" ]; then
+      SRC="$cand"
+      break
+    fi
+  done
+fi
+
+if [ -z "$SRC" ] || [ ! -f "$SRC/bin/telemetry-log" ]; then
+  echo "FATAL: can't find skill-telemetry source dir." >&2
+  echo "Either cd into it, or pass --source /path/to/skill-telemetry" >&2
+  exit 1
+fi
+
+echo "Source: $SRC"
+
+# ─── Pull latest from main (unless --no-pull) ────────────────
+if [ "$NO_PULL" = "0" ] && [ -d "$SRC/.git" ]; then
+  echo "Pulling latest from main..."
+  ( cd "$SRC" && git fetch origin main --quiet && git pull --ff-only --quiet ) || {
+    echo "WARN: git pull failed; using whatever's in $SRC." >&2
+  }
+fi
+
+SRC_VERSION="$(cat "$SRC/VERSION" 2>/dev/null || echo unknown)"
+echo "Source version: $SRC_VERSION"
+echo ""
+
+# ─── Find installed skills with telemetry/ ───────────────────
+INSTALLED=()
+for skill_dir in "$HOME/.claude/skills/"*; do
+  [ -d "$skill_dir/telemetry" ] || continue
+  [ -f "$skill_dir/telemetry/bin/telemetry-log" ] || continue
+  INSTALLED+=("$skill_dir")
+done
+
+# Also catch add-telemetry's own embedded copy
+META="$SRC/skills/add-telemetry"
+if [ -d "$META/telemetry" ] && [ -f "$META/telemetry/bin/telemetry-log" ]; then
+  INSTALLED+=("$META")
+fi
+
+if [ ${#INSTALLED[@]} -eq 0 ]; then
+  echo "No skills with telemetry/ found at ~/.claude/skills/*/telemetry/"
+  exit 0
+fi
+
+echo "Found ${#INSTALLED[@]} installed skill(s) with telemetry:"
+for s in "${INSTALLED[@]}"; do
+  echo "  - $s"
+done
+echo ""
+
+# ─── Update each skill ──────────────────────────────────────
+UPDATED=0
+SKIPPED=0
+FAILED=0
+
+for SKILL_DIR in "${INSTALLED[@]}"; do
+  SKILL_NAME=$(basename "$SKILL_DIR")
+
+  # Filter: skip list
+  if echo "$SKIP_LIST" | grep -qw "$SKILL_NAME"; then
+    echo "[SKIP via --skip] $SKILL_NAME"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  # Filter: include list (if set, only listed skills)
+  if [ -n "$INCLUDE_LIST" ] && ! echo "$INCLUDE_LIST" | grep -qw "$SKILL_NAME"; then
+    echo "[SKIP not in --include] $SKILL_NAME"
+    SKIPPED=$((SKIPPED + 1))
+    continue
+  fi
+
+  TEL_DIR="$SKILL_DIR/telemetry"
+
+  # Compute a list of files to update + diff each
+  CHANGED=0
+  FILE_CHANGES=""
+
+  for REL in \
+    "bin/telemetry-log" \
+    "bin/telemetry-sync" \
+    "bin/telemetry-update-check" \
+    "bin/skill-events" \
+    "SKILL.md.snippet" \
+    "PRIVACY.md"; do
+
+    SRC_FILE="$SRC/$REL"
+    DST_FILE="$TEL_DIR/$REL"
+
+    [ -f "$SRC_FILE" ] || continue
+
+    if [ ! -f "$DST_FILE" ]; then
+      FILE_CHANGES="$FILE_CHANGES + $REL"
+      CHANGED=$((CHANGED + 1))
+      continue
+    fi
+
+    if ! cmp -s "$SRC_FILE" "$DST_FILE"; then
+      FILE_CHANGES="$FILE_CHANGES * $REL"
+      CHANGED=$((CHANGED + 1))
+    fi
+  done
+
+  if [ "$CHANGED" -eq 0 ]; then
+    echo "[OK] $SKILL_NAME (already current)"
+    continue
+  fi
+
+  if [ "$DRY_RUN" = "1" ]; then
+    echo "[DRY] $SKILL_NAME would update:"
+    # FILE_CHANGES is space-delim "+ file1 * file2 + file3"
+    # Pair each marker with its filename
+    echo "$FILE_CHANGES" | awk '
+      { for (i=1; i<=NF; i++) { if ($i == "+" || $i == "*") { mark = $i } else { printf "      %s %s\n", mark, $i } } }
+    '
+    UPDATED=$((UPDATED + 1))
+    continue
+  fi
+
+  echo "[UPDATE] $SKILL_NAME:"
+  APPLY_FAILED=0
+  for REL in \
+    "bin/telemetry-log" \
+    "bin/telemetry-sync" \
+    "bin/telemetry-update-check" \
+    "bin/skill-events" \
+    "SKILL.md.snippet" \
+    "PRIVACY.md"; do
+
+    SRC_FILE="$SRC/$REL"
+    DST_FILE="$TEL_DIR/$REL"
+
+    [ -f "$SRC_FILE" ] || continue
+
+    if [ -f "$DST_FILE" ] && cmp -s "$SRC_FILE" "$DST_FILE"; then
+      continue
+    fi
+
+    mkdir -p "$(dirname "$DST_FILE")" 2>/dev/null || true
+
+    if cp "$SRC_FILE" "$DST_FILE" 2>/dev/null; then
+      case "$REL" in bin/*) chmod +x "$DST_FILE" 2>/dev/null || true ;; esac
+      echo "         ✓ $REL"
+    else
+      echo "         ✗ $REL (cp failed)"
+      APPLY_FAILED=1
+    fi
+  done
+
+  if [ "$APPLY_FAILED" = "1" ]; then
+    FAILED=$((FAILED + 1))
+  else
+    UPDATED=$((UPDATED + 1))
+    rm -f "$HOME/.skill-telemetry/.update-check" 2>/dev/null || true
+  fi
+done
+
+echo ""
+echo "Summary: $UPDATED updated, $SKIPPED skipped, $FAILED failed"
+if [ "$DRY_RUN" = "1" ]; then
+  echo "(dry run — no files were written. Re-run without --dry-run to apply.)"
+fi
+
+# ─── Fire a consent_granted event so author sees adoption ──
+if [ "$DRY_RUN" = "0" ] && [ "$UPDATED" -gt 0 ]; then
+  FIRE_LOG=""
+  for d in "${INSTALLED[@]}"; do
+    if [ -x "$d/telemetry/bin/telemetry-log" ]; then
+      FIRE_LOG="$d/telemetry/bin/telemetry-log"
+      break
+    fi
+  done
+  if [ -n "$FIRE_LOG" ]; then
+    "$FIRE_LOG" \
+      --skill skill-telemetry \
+      --event-type consent_granted \
+      --outcome success \
+      --skill-version "$SRC_VERSION" \
+      --step "updated_${UPDATED}_skills" \
+      --session-id "tel-update-run-$(date +%s)" 2>/dev/null || true
+  fi
+fi
+
+exit "$FAILED"
