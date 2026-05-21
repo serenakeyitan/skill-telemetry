@@ -227,11 +227,44 @@ record automatically once your users install the new SKILL.md.
 
 ---
 
-## Dashboards (queries you'll actually run)
+## Querying your data
 
-The schema ships with three views. In Supabase SQL Editor:
+### From your terminal (local timezone)
+
+The repo ships with `bin/skill-events` — auto-detects your local
+timezone, formats events as a table, supports filters:
+
+```bash
+bin/skill-events                          # last 20 events in your TZ
+bin/skill-events --tz Asia/Shanghai       # override TZ
+bin/skill-events --skill tdoc --limit 50  # filter to one skill
+bin/skill-events --failures               # only error/abandoned
+```
+
+Output:
+
+```
+TZ: America/Los_Angeles
+
+TIME                 SKILL  OUTCOME  STEP  DUR  ERR
+----                 -----  -------  ----  ---  ---
+2026-05-21 00:25:46  tdoc   success  new   2
+2026-05-20 23:27:31  tdoc   success  edit  142
+```
+
+Requires `SUPABASE_ACCESS_TOKEN` (or `supabase login` once — macOS
+keychain is read automatically). Config (URL + anon key) is auto-found
+from any installed skill's `telemetry/supabase/config.sh`.
+
+### From Supabase SQL Editor
+
+The schema ships with three views + one timezone-aware function:
 
 ```sql
+-- Local-time view (best practice: storage stays UTC, display converts)
+select * from skill_events_in_tz('America/Los_Angeles') limit 20;
+select * from skill_events_in_tz('Asia/Shanghai') limit 20;
+
 -- Which skills are used the most?
 select * from skill_usage_summary;
 
@@ -245,6 +278,14 @@ select * from skill_daily_usage where day > now() - interval '30 days';
 For prettier dashboards, point any of these at Grafana / Metabase / a
 spreadsheet via Supabase's read-only DB connection (Settings → Database
 → Connection string).
+
+### A note on timezones
+
+`skill_events.ts` is a `timestamptz` storing UTC. This is intentional —
+your users span timezones and only UTC is unambiguous for sorting,
+comparing, and aggregating. Convert to local time **only at the
+display boundary** using `skill_events_in_tz(tz)` or the `bin/skill-events`
+helper.
 
 ---
 

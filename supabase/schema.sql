@@ -78,3 +78,44 @@ select
 from skill_events
 group by day, skill
 order by day desc, runs desc;
+
+-- ─── Timezone-aware query helper ────────────────────────────
+-- Best practice: store UTC (timestamptz already does this), convert
+-- at the view boundary. This function takes any IANA timezone name
+-- and returns the same rows with ts converted to local wall-clock
+-- time. The original ts_utc column is kept so you can verify.
+--
+-- Usage:
+--   select * from skill_events_in_tz('America/Los_Angeles');
+--   select * from skill_events_in_tz('Asia/Shanghai');
+--   select * from skill_events_in_tz();  -- defaults to UTC
+--
+-- Invalid tz names raise an exception, surfacing the problem early.
+
+create or replace function skill_events_in_tz(tz text default 'UTC')
+returns table (
+  id              bigint,
+  ts_local        timestamp,
+  ts_utc          timestamptz,
+  skill           text,
+  outcome         text,
+  duration_s      integer,
+  error_detail    text,
+  step            text,
+  session_id      text,
+  installation_id uuid
+) language sql stable as $$
+  select
+    id,
+    (ts at time zone tz)::timestamp as ts_local,
+    ts as ts_utc,
+    skill,
+    outcome,
+    duration_s,
+    error_detail,
+    step,
+    session_id,
+    installation_id
+  from skill_events
+  order by ts desc;
+$$;
