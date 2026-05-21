@@ -56,12 +56,26 @@ echo "Source directory: $SRC"
 
 ---
 
-## Step 0 — Mark install start time
+## Step 0 — Mark install start time + self-telemetry preamble
 
 ```bash
 TARGET="${TARGET:-$PWD}"
 SENTINEL="$TARGET/.add-telemetry-start"
 date +%s > "$SENTINEL"
+
+# Self-telemetry: record this add-telemetry run if instrumented.
+# This block fires regardless of what skill we're installing into —
+# it tracks usage of THIS meta-skill (add-telemetry) itself.
+META_SKILL_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+[ -z "$META_SKILL_DIR" ] && META_SKILL_DIR="$HOME/code/skill-telemetry/skills/add-telemetry"
+META_TEL_BIN="$META_SKILL_DIR/telemetry/bin/telemetry-log"
+META_TEL_HOME="$HOME/.add-telemetry"
+META_TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+if [ -x "$META_TEL_BIN" ]; then
+  mkdir -p "$META_TEL_HOME/sentinels"
+  date +%s > "$META_TEL_HOME/sentinels/$META_TEL_SESSION_ID"
+  find "$META_TEL_HOME/sentinels" -type f -mtime +1 -delete 2>/dev/null || true
+fi
 ```
 
 ## Step 1 — Locate target skill + detect skill name
@@ -521,6 +535,40 @@ Users opt out via: export SKILL_TELEMETRY=off
 Privacy text for your README:
   $TARGET/telemetry/PRIVACY.md  (paste into your README's privacy section)
 ```
+
+## Step 14 — Self-telemetry (fire add-telemetry's own event)
+
+**This block records that add-telemetry itself ran.** Lets the
+maintainer of add-telemetry see how many people install telemetry,
+which skills they install it on, and what fails. Recursive
+dogfooding — meta-skill instruments itself.
+
+```bash
+# Compute duration from the meta-sentinel written in Step 0
+META_TEL_BIN_PATH="$META_TEL_BIN"  # set in Step 0
+META_TEL_HOME_PATH="$META_TEL_HOME"
+META_END=$(date +%s)
+META_START=$(cat "$META_TEL_HOME_PATH/sentinels/$META_TEL_SESSION_ID" 2>/dev/null || echo "$META_END")
+META_DURATION=$(( META_END - META_START ))
+rm -f "$META_TEL_HOME_PATH/sentinels/$META_TEL_SESSION_ID"
+
+# Fire event. --step records which target skill we instrumented.
+# --error-class will be empty on success.
+if [ -x "$META_TEL_BIN_PATH" ]; then
+  "$META_TEL_BIN_PATH" \
+    --skill add-telemetry \
+    --outcome success \
+    --duration "$META_DURATION" \
+    --step "installed_to:$SKILL_NAME" \
+    --skill-version "$(cat "$META_SKILL_DIR/VERSION" 2>/dev/null || echo unknown)" \
+    --session-id "$META_TEL_SESSION_ID"
+fi
+```
+
+If install failed (Step 12 smoke test fail), do the equivalent with
+`--outcome error --error-class <code> --error-message <body>`. Do
+not silently fail to record errors — the maintainer needs to know
+which installs broke.
 
 ---
 
