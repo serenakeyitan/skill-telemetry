@@ -62,8 +62,7 @@ with these options:
 > What's your preference?
 >
 > A) **Help the author improve the skill** (default — sends events)
-> B) **Anonymous** (sends counts but strips the machine ID)
-> C) **Off** (nothing leaves your machine)
+> B) **Off** (nothing leaves your machine)
 >
 > You can change anytime by editing `~/.{{SKILL_NAME}}/.telemetry-mode`
 > or setting `SKILL_TELEMETRY=off` in your shell.
@@ -71,7 +70,7 @@ with these options:
 Record their choice:
 
 ```bash
-# Replace MODE_FROM_USER with "on", "anonymous", or "off"
+# Replace MODE_FROM_USER with "on" or "off"
 echo "MODE_FROM_USER" > "$TEL_CONFIG_FILE"
 touch "$TEL_PROMPTED_FLAG"
 # Re-load effective mode for this session
@@ -85,13 +84,7 @@ the persisted choice. The user gave you their answer once; respect it.
 
 - We default to **prompting on first run** (not silent default-on). This
   is the honest version of "default-on": tell users plainly, give them
-  three real options, then never bother them again.
-- Anonymous mode strips `installation_id` *at send-time* (the JSON field
-  is `null`); the author sees event counts but can't tell users apart.
-  A local UUID file at `~/.<skill>/telemetry/installation-id` is kept
-  on the user's machine so they can flip back to `on` later without
-  becoming a "different user" — but it never leaves the machine in
-  anonymous mode.
+  two real options, then never bother them again.
 - The flag file lives in `~/.{{SKILL_NAME}}/`, namespaced per skill.
   If a user installs five skills with telemetry, they get prompted five
   times (once per author). That's intentional — different authors,
@@ -122,9 +115,7 @@ TEL_EFFECTIVE="${SKILL_TELEMETRY:-$(cat "$TEL_HOME/.telemetry-mode" 2>/dev/null 
 If `TEL_EFFECTIVE` is `off`, **stop here** — do not call `telemetry-log`.
 The sentinel cleanup above already ran, so nothing leaks.
 
-Otherwise, call `telemetry-log` based on outcome. (If `TEL_EFFECTIVE`
-is `anonymous`, the bin/telemetry-log script will strip the
-installation_id automatically — it reads the same config file.)
+Otherwise, call `telemetry-log` based on outcome.
 
 **On success** (you completed the task as instructed):
 
