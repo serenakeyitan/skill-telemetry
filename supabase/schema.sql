@@ -9,12 +9,32 @@ create table if not exists skill_events (
   skill           text          not null,
   outcome         text,         -- success | error | abandoned | unknown
   duration_s      integer,
-  error_detail    text,         -- short failure string, ≤160 chars
+  error_detail    text,         -- DEPRECATED in v2; kept for backward compat
   step            text,         -- which step failed/completed
   session_id      text,
   installation_id uuid,         -- per-machine UUID
   received_at     timestamptz   default now()
 );
+
+-- ─── v0.2.0 schema additions (idempotent) ───────────────────
+-- These columns are added by ALTER TABLE so existing pools upgrade
+-- without losing data. Old clients that don't send these fields just
+-- get NULLs — fully backward compatible.
+
+alter table skill_events
+  add column if not exists schema_version smallint default 1,
+  add column if not exists os             text,         -- darwin | linux | ...
+  add column if not exists arch           text,         -- arm64 | x86_64 | ...
+  add column if not exists skill_version  text,         -- e.g. "0.1.55"
+  add column if not exists error_class    text,         -- low-cardinality tag
+  add column if not exists error_message  text;         -- high-cardinality detail
+
+-- For existing pools where error_detail was used as a combined field,
+-- migrate it into error_message so dashboards keep working.
+update skill_events
+   set error_message = error_detail
+ where error_message is null
+   and error_detail is not null;
 
 -- ─── Indexes you'll actually use ────────────────────────────
 create index if not exists skill_events_skill_ts
@@ -25,6 +45,12 @@ create index if not exists skill_events_outcome
 
 create index if not exists skill_events_install
   on skill_events (installation_id, ts desc);
+
+create index if not exists skill_events_error_class
+  on skill_events (error_class) where error_class is not null;
+
+create index if not exists skill_events_skill_version
+  on skill_events (skill, skill_version);
 
 -- ─── Row-level security ─────────────────────────────────────
 -- The anon key is PUBLIC (committed in skill code). RLS denies all
@@ -53,19 +79,50 @@ from skill_events
 group by skill
 order by total_runs desc;
 
--- Failure modes — the iteration signal
+-- Failure modes — the iteration signal.
+-- Grouped by error_class (low-cardinality) for clean aggregation;
+-- error_message in a separate column for drill-down debugging.
 create or replace view skill_failure_modes as
 select
   skill,
   step,
-  error_detail,
+  error_class,
   count(*) as occurrences,
   count(distinct installation_id) as affected_installs,
-  max(ts) as last_seen
+  max(ts) as last_seen,
+  -- Sample one error_message per group for context
+  (array_agg(error_message order by ts desc) filter (where error_message is not null))[1] as sample_message
 from skill_events
 where outcome = 'error'
-group by skill, step, error_detail
+group by skill, step, error_class
 order by occurrences desc;
+
+-- Cross-version regression view: did a release introduce errors?
+create or replace view skill_errors_by_version as
+select
+  skill,
+  skill_version,
+  count(*) filter (where outcome = 'error') as errors,
+  count(*) as total_runs,
+  round(100.0 * count(*) filter (where outcome = 'error') / nullif(count(*), 0), 2) as error_pct
+from skill_events
+where skill_version is not null
+group by skill, skill_version
+order by skill, skill_version desc;
+
+-- Platform breakdown — see if bugs are macOS vs Linux
+create or replace view skill_platform_usage as
+select
+  skill,
+  os,
+  arch,
+  count(*) as runs,
+  count(distinct installation_id) as installs,
+  count(*) filter (where outcome = 'error') as errors
+from skill_events
+where os is not null
+group by skill, os, arch
+order by skill, runs desc;
 
 -- Per-day usage
 create or replace view skill_daily_usage as
@@ -97,25 +154,36 @@ returns table (
   id              bigint,
   ts_local        timestamp,
   ts_utc          timestamptz,
+  schema_version  smallint,
   skill           text,
+  skill_version   text,
   outcome         text,
   duration_s      integer,
-  error_detail    text,
   step            text,
+  error_class     text,
+  error_message   text,
   session_id      text,
-  installation_id uuid
+  installation_id uuid,
+  os              text,
+  arch            text
 ) language sql stable as $$
   select
     id,
     (ts at time zone tz)::timestamp as ts_local,
     ts as ts_utc,
+    schema_version,
     skill,
+    skill_version,
     outcome,
     duration_s,
-    error_detail,
     step,
+    -- Prefer error_class but fall back to error_detail (v1 data) for display
+    coalesce(error_class, error_detail) as error_class,
+    error_message,
     session_id,
-    installation_id
+    installation_id,
+    os,
+    arch
   from skill_events
   order by ts desc;
 $$;

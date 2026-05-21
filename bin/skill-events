@@ -102,7 +102,7 @@ fi
 [ -z "$ACCESS_TOKEN" ] && { echo "FATAL: no SUPABASE_ACCESS_TOKEN. Run 'supabase login' or export the env var."; exit 1; }
 
 # ─── Build SQL ──────────────────────────────────────────────
-SQL="select to_char(ts_local, 'YYYY-MM-DD HH24:MI:SS') as t, skill, outcome, coalesce(step, '-') as step, coalesce(duration_s, 0) as dur_s, coalesce(error_detail, '') as err from skill_events_in_tz('$TZ_NAME')"
+SQL="select to_char(ts_local, 'YYYY-MM-DD HH24:MI:SS') as t, skill, outcome, coalesce(step, '-') as step, coalesce(duration_s, 0) as dur_s, coalesce(error_class, '') as err_class, coalesce(error_message, '') as err_msg from skill_events_in_tz('$TZ_NAME')"
 
 WHERE_PARTS=()
 [ -n "$SKILL_FILTER" ] && WHERE_PARTS+=("skill = '$SKILL_FILTER'")
@@ -125,10 +125,11 @@ RESP=$(curl -s --max-time 15 \
   -d "$(jq -n --arg q "$SQL" '{query: $q}')")
 
 if echo "$RESP" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+  # Truncate error_message to 50 chars for table display (use jq slice)
   echo "$RESP" | jq -r '
-    (["TIME","SKILL","OUTCOME","STEP","DUR","ERR"]),
-    (["----","-----","-------","----","---","---"]),
-    (.[] | [.t, .skill, .outcome, .step, (.dur_s|tostring), .err])
+    (["TIME","SKILL","OUTCOME","STEP","DUR","ERR_CLASS","ERR_MSG"]),
+    (["----","-----","-------","----","---","---------","-------"]),
+    (.[] | [.t, .skill, .outcome, .step, (.dur_s|tostring), .err_class, (.err_msg | if length > 50 then .[:47] + "..." else . end)])
     | @tsv' | column -t -s $'\t'
 elif echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
   echo "(no rows match)"

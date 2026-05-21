@@ -26,19 +26,38 @@ const ALLOWED_OUTCOMES = new Set([
 // Cap accepted batches so a misbehaving client can't fill the table
 const MAX_BATCH = 100;
 
-// Cap error_detail string length on the server side too (defense in depth)
-const MAX_ERROR_DETAIL_LEN = 160;
+// Server-side caps (defense in depth; client already caps but trust nothing)
+const MAX_ERROR_CLASS_LEN = 60;
+const MAX_ERROR_MESSAGE_LEN = 400;
+const MAX_ERROR_DETAIL_LEN = 160; // legacy v1 field
+const MAX_STEP_LEN = 100;
+const MAX_SKILL_LEN = 200;
+const MAX_SKILL_VERSION_LEN = 40;
+const MAX_SESSION_LEN = 200;
+const MAX_OS_LEN = 20;
+const MAX_ARCH_LEN = 20;
 
 type IncomingEvent = {
+  v?: number;                       // schema version, v2+
   ts?: string;
   skill?: string;
+  skill_version?: string | null;    // v2
   outcome?: string | null;
   duration_s?: number | null;
-  error_detail?: string | null;
+  error_detail?: string | null;     // v1 legacy
+  error_class?: string | null;      // v2
+  error_message?: string | null;    // v2
   step?: string | null;
   session_id?: string | null;
   installation_id?: string | null;
+  os?: string | null;               // v2
+  arch?: string | null;             // v2
 };
+
+function clampStr(v: unknown, max: number): string | null {
+  if (typeof v !== "string" || v.length === 0) return null;
+  return v.slice(0, max);
+}
 
 function sanitize(e: IncomingEvent): Record<string, unknown> | null {
   // skill is the only required field
@@ -46,11 +65,6 @@ function sanitize(e: IncomingEvent): Record<string, unknown> | null {
 
   const outcome =
     e.outcome && ALLOWED_OUTCOMES.has(e.outcome) ? e.outcome : "unknown";
-
-  let errorDetail: string | null = null;
-  if (typeof e.error_detail === "string" && e.error_detail.length > 0) {
-    errorDetail = e.error_detail.slice(0, MAX_ERROR_DETAIL_LEN);
-  }
 
   let duration: number | null = null;
   if (
@@ -74,16 +88,42 @@ function sanitize(e: IncomingEvent): Record<string, unknown> | null {
     installId = e.installation_id.toLowerCase();
   }
 
+  // Schema version: accept 1 or 2; default 1 for legacy clients
+  let schemaVersion = 1;
+  if (typeof e.v === "number" && Number.isInteger(e.v) && e.v >= 1 && e.v <= 2) {
+    schemaVersion = e.v;
+  }
+
+  // v1 backward-compat: error_detail → error_message if v2 fields empty
+  const errorClass = clampStr(e.error_class, MAX_ERROR_CLASS_LEN);
+  let errorMessage = clampStr(e.error_message, MAX_ERROR_MESSAGE_LEN);
+  const errorDetail = clampStr(e.error_detail, MAX_ERROR_DETAIL_LEN);
+  if (!errorMessage && errorDetail) {
+    errorMessage = errorDetail;
+  }
+
+  // OS / arch: lowercase, allow alphanumerics + dash/underscore
+  const cleanPlatform = (v: unknown, max: number): string | null => {
+    const s = clampStr(v, max);
+    if (!s) return null;
+    return /^[a-z0-9_-]+$/i.test(s) ? s.toLowerCase() : null;
+  };
+
   return {
+    schema_version: schemaVersion,
     ts: typeof e.ts === "string" ? e.ts : new Date().toISOString(),
-    skill: e.skill.slice(0, 200),
+    skill: e.skill.slice(0, MAX_SKILL_LEN),
+    skill_version: clampStr(e.skill_version, MAX_SKILL_VERSION_LEN),
     outcome,
     duration_s: duration,
-    error_detail: errorDetail,
-    step: typeof e.step === "string" ? e.step.slice(0, 100) : null,
-    session_id:
-      typeof e.session_id === "string" ? e.session_id.slice(0, 200) : null,
+    error_class: errorClass,
+    error_message: errorMessage,
+    error_detail: errorDetail, // kept null for v2 clients; populated for v1
+    step: clampStr(e.step, MAX_STEP_LEN),
+    session_id: clampStr(e.session_id, MAX_SESSION_LEN),
     installation_id: installId,
+    os: cleanPlatform(e.os, MAX_OS_LEN),
+    arch: cleanPlatform(e.arch, MAX_ARCH_LEN),
   };
 }
 
