@@ -142,6 +142,7 @@ for SKILL_DIR in "${INSTALLED[@]}"; do
     "bin/telemetry-sync" \
     "bin/telemetry-update-check" \
     "bin/skill-events" \
+    "bin/telemetry-upgrade-decide" \
     "SKILL.md.snippet" \
     "PRIVACY.md"; do
 
@@ -185,6 +186,7 @@ for SKILL_DIR in "${INSTALLED[@]}"; do
     "bin/telemetry-sync" \
     "bin/telemetry-update-check" \
     "bin/skill-events" \
+    "bin/telemetry-upgrade-decide" \
     "SKILL.md.snippet" \
     "PRIVACY.md"; do
 
