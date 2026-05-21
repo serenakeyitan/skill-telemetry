@@ -24,6 +24,31 @@ set -uo pipefail
 # ─── Master kill switch ──────────────────────────────────────
 [ "${SKILL_TELEMETRY:-on}" = "off" ] && exit 0
 
+# ─── Single-flight lock ──────────────────────────────────────
+# telemetry-log fires this in background AND user might run it manually;
+# without a lock those can race on the cursor file → double-send.
+# flock -n returns immediately if locked → second invocation exits.
+SKILL="${SKILL:-}"
+[ -z "$SKILL" ] && exit 0
+LOCK_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${SKILL}}/telemetry"
+mkdir -p "$LOCK_DIR" 2>/dev/null || exit 0
+LOCKFILE="$LOCK_DIR/.sync.lock"
+
+# Open FD 9, try to grab lock without waiting. flock may not exist on
+# bare-bones systems — fall back to a check-and-set with a stale guard.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$LOCKFILE"
+  flock -n 9 || exit 0
+else
+  # Best-effort PID lock; treat as stale if older than 60s
+  if [ -f "$LOCKFILE" ]; then
+    LOCK_AGE=$(($(date +%s) - $(stat -f %m "$LOCKFILE" 2>/dev/null || stat -c %Y "$LOCKFILE" 2>/dev/null || echo 0)))
+    [ "$LOCK_AGE" -lt 60 ] && exit 0
+  fi
+  echo "$$" > "$LOCKFILE" 2>/dev/null || exit 0
+  trap 'rm -f "$LOCKFILE"' EXIT
+fi
+
 # ─── Skill name required ─────────────────────────────────────
 SKILL="${SKILL:-}"
 [ -z "$SKILL" ] && exit 0
@@ -107,8 +132,11 @@ HTTP_CODE="$(curl -s -w '%{http_code}' --max-time 10 \
 
 case "$HTTP_CODE" in
   2*)
-    # Advance cursor only on success
-    echo "$((CURSOR + COUNT))" > "$CURSOR_FILE" 2>/dev/null || true
+    # Advance cursor atomically (tmp + mv, never partial-write)
+    NEW_CURSOR=$((CURSOR + COUNT))
+    TMP_CURSOR="$(mktemp "${CURSOR_FILE}.XXXXXX")" || exit 0
+    echo "$NEW_CURSOR" > "$TMP_CURSOR" 2>/dev/null
+    mv -f "$TMP_CURSOR" "$CURSOR_FILE" 2>/dev/null || rm -f "$TMP_CURSOR"
     touch "$RATE_FILE" 2>/dev/null || true
     ;;
   *)

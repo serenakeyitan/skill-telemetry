@@ -11,3 +11,4 @@ supabase/config.sh
 *.jsonl
 .cursor-*
 .start-*
+supabase/.temp/

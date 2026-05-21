@@ -1,29 +1,38 @@
 ---
 name: add-telemetry
-description: Adds skill-telemetry (per-invocation event logging with success/error/abandoned outcomes pushed to the author's own Supabase) to a Claude Code skill. Use this when a skill author wants to know how their skill is actually being used. Sets up everything end-to-end with at most 2 questions to the user.
+description: Adds skill-telemetry (per-invocation event logging with success/error/abandoned outcomes pushed to the author's own Supabase) to a Claude Code skill. Use this when a skill author wants to know how their skill is actually being used. Path A is fully automated — you give us a Supabase login, we create the project, deploy the schema and edge function, install telemetry into your skill, and run a smoke test. Total user interactions: ~3 (one browser auth + two acknowledgments).
 ---
 
 # add-telemetry
 
 You will add telemetry to a Claude Code skill so its author can see real
-usage data in their own Supabase database. Follow this script exactly. Your
-goal: complete the install with the **fewest possible interactions with
-the user**. Combine the Supabase URL+key into ONE question, and otherwise
-proceed automatically.
+usage data in their own Supabase database.
+
+There are **two paths**. Pick the one matching the user's situation, then
+follow it linearly. Do not mix.
+
+- **Path A — Fully automated** (recommended). The user has (or will get)
+  Supabase auth on this machine. We do everything via Supabase Management
+  API + CLI: create project, deploy schema, deploy edge function, install
+  telemetry, smoke test. **3 user interactions total**: one browser
+  login + accepting two safety confirmations along the way.
+- **Path B — Manual fallback**. The user already has a Supabase project
+  and just wants to hand us URL+key. We skip CLI entirely, only ask for
+  the two values, write config, install telemetry, smoke test.
+
+If the user didn't say, ask once: "Do you want me to create a new
+Supabase project for you (Path A), or use an existing one (Path B)?"
+Default to Path A — it's faster and matches the design intent.
+
+---
 
 ## Source files
 
-This meta-skill lives inside the `skill-telemetry` repo. The template
-files you'll copy live at `<repo-root>/bin/`, `<repo-root>/supabase/`,
-etc.
-
-**Finding the source directory** (this is the part most likely to break):
+This meta-skill lives in the `skill-telemetry` repo. Template files
+(bin/, supabase/, SKILL.md.snippet, PRIVACY.md) are at the repo root.
 
 ```bash
-# You know where this SKILL.md is because you're reading it. Try in order:
-# 1. If you can determine the absolute path to this SKILL.md, use:
-#    SRC="$(cd "$(dirname "$THIS_SKILL_PATH")/../.." && pwd)"
-# 2. Otherwise: clone fresh as a fallback.
+# Discover the source dir. Try known paths first, fall back to fresh clone.
 SRC=""
 for candidate in \
   "$HOME/code/skill-telemetry" \
@@ -50,75 +59,238 @@ echo "Source directory: $SRC"
 ## Step 0 — Mark install start time
 
 ```bash
-# Use a deterministic name, not $$ — each Bash tool call is a fresh shell
-# with a different PID, so $$-suffixed files won't be findable in later
-# steps. Scope by TARGET path instead.
 TARGET="${TARGET:-$PWD}"
 SENTINEL="$TARGET/.add-telemetry-start"
 date +%s > "$SENTINEL"
 ```
 
-This lets Step 9 report how long the install took.
-
-## Step 1 — Locate the target skill
-
-The user invoked you from a working directory. Determine what skill they
-want to instrument:
+## Step 1 — Locate target skill + detect skill name
 
 ```bash
-# Default to cwd. If the user said "add telemetry to /path/to/skill",
-# use that instead.
 TARGET="${TARGET:-$PWD}"
 
-# Verify it's a skill directory
 if [ ! -f "$TARGET/SKILL.md" ] && [ ! -f "$TARGET/.claude-plugin/plugin.json" ]; then
   echo "ERROR: $TARGET doesn't look like a Claude Code skill directory."
   echo "It needs SKILL.md or .claude-plugin/plugin.json."
-  echo "cd into your skill repo and re-run /add-telemetry, or pass the path."
+  echo "cd into your skill repo and re-run /add-telemetry."
   exit 1
 fi
 
-# Detect skill name (no question if possible):
 SKILL_NAME=""
-# Try 1: SKILL.md frontmatter
-if [ -f "$TARGET/SKILL.md" ]; then
+[ -f "$TARGET/SKILL.md" ] && \
   SKILL_NAME="$(awk '/^name:/ { print $2; exit }' "$TARGET/SKILL.md")"
-fi
-# Try 2: plugin.json
-if [ -z "$SKILL_NAME" ] && [ -f "$TARGET/.claude-plugin/plugin.json" ]; then
+[ -z "$SKILL_NAME" ] && [ -f "$TARGET/.claude-plugin/plugin.json" ] && \
   SKILL_NAME="$(grep -o '"name"[[:space:]]*:[[:space:]]*"[^"]*"' "$TARGET/.claude-plugin/plugin.json" | head -1 | cut -d'"' -f4)"
-fi
-# Try 3: basename
-if [ -z "$SKILL_NAME" ]; then
+[ -z "$SKILL_NAME" ] && \
   SKILL_NAME="$(basename "$TARGET" | tr '[:upper:] ' '[:lower:]-')"
-fi
 
 echo "Target: $TARGET"
 echo "Skill name: $SKILL_NAME"
 ```
 
-Only ask the user to confirm the name IF the detection used the basename
-fallback AND the basename looks non-skill-like (has dots, starts with
-underscore, etc.). Otherwise, proceed — do not ask for confirmation.
-
-## Step 2 — Idempotency check
+## Step 2 — Idempotency
 
 ```bash
 ALREADY_INSTALLED=0
 [ -d "$TARGET/telemetry" ] && [ -f "$TARGET/telemetry/bin/telemetry-log" ] && ALREADY_INSTALLED=1
 grep -q "telemetry-log" "$TARGET/SKILL.md" 2>/dev/null && SKILL_MD_WIRED=1 || SKILL_MD_WIRED=0
+echo "ALREADY_INSTALLED=$ALREADY_INSTALLED, SKILL_MD_WIRED=$SKILL_MD_WIRED"
 ```
 
-Decision logic — **do not ask the user**, apply rules:
+Decisions (apply silently):
+- Both 0 → fresh install, proceed normally
+- Files yes, SKILL.md no → skip Step 7 (copy), continue at Step 11 (append SKILL.md)
+- SKILL.md yes, files no → re-copy in Step 7, skip Step 11
+- Both yes → "re-validate" mode: only re-run Step 12 (smoke test)
 
-- If neither: proceed normally.
-- If files installed but SKILL.md not wired: proceed, skip Step 3 (copy),
-  do Step 7 (append).
-- If SKILL.md wired but files missing: re-copy in Step 3, skip Step 7.
-- If both: report "already installed" and only re-run Step 4 (config) +
-  Step 8 (smoke test). This is the "re-validate" mode.
+---
 
-## Step 3 — Copy template files (skip if already done in Step 2)
+# Path A — Fully automated install
+
+Use this when the user wants us to create the Supabase project. Skip
+to Path B if they want to use an existing project.
+
+## Step 3 — Detect + install Supabase CLI
+
+```bash
+if command -v supabase >/dev/null 2>&1; then
+  echo "✅ supabase CLI present: $(supabase --version 2>&1 | head -1)"
+else
+  echo "Installing supabase CLI..."
+  case "$(uname -s)" in
+    Darwin)
+      if command -v brew >/dev/null 2>&1; then
+        brew tap supabase/tap 2>&1 | tail -3
+        brew install supabase/tap/supabase 2>&1 | tail -5
+      else
+        echo "FATAL: Homebrew required on macOS. Install from https://brew.sh"
+        exit 1
+      fi
+      ;;
+    Linux)
+      # Try official install script
+      curl -fsSL https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64.tar.gz \
+        -o /tmp/supabase-cli.tar.gz
+      tar -xzf /tmp/supabase-cli.tar.gz -C /tmp
+      sudo mv /tmp/supabase /usr/local/bin/
+      rm -f /tmp/supabase-cli.tar.gz
+      ;;
+    *)
+      echo "FATAL: Unsupported platform. Install supabase CLI manually:"
+      echo "  https://supabase.com/docs/guides/cli/getting-started"
+      exit 1
+      ;;
+  esac
+
+  if ! command -v supabase >/dev/null 2>&1; then
+    echo "FATAL: supabase CLI install failed."
+    exit 1
+  fi
+  echo "✅ Installed: $(supabase --version 2>&1 | head -1)"
+fi
+```
+
+## Step 4 — Read Supabase access token
+
+The supabase CLI stores its access token differently per platform.
+**This was a friction point during dogfood — don't trust the docs that
+say `~/.supabase/access-token`.**
+
+```bash
+ACCESS_TOKEN=""
+
+case "$(uname -s)" in
+  Darwin)
+    # On macOS the token is stored in keychain, base64-encoded with a
+    # "go-keyring-base64:" prefix.
+    RAW=$(security find-generic-password -s "Supabase CLI" -w 2>/dev/null || true)
+    if [ -n "$RAW" ]; then
+      B64=${RAW#go-keyring-base64:}
+      ACCESS_TOKEN=$(echo "$B64" | base64 -D 2>/dev/null || echo "$B64" | base64 --decode 2>/dev/null || echo "")
+    fi
+    ;;
+  Linux)
+    # Check known locations
+    for tokfile in \
+      "$HOME/.supabase/access-token" \
+      "$XDG_CONFIG_HOME/supabase/access-token" \
+      "$HOME/.config/supabase/access-token"; do
+      if [ -f "$tokfile" ]; then
+        ACCESS_TOKEN="$(cat "$tokfile")"
+        break
+      fi
+    done
+    ;;
+esac
+
+if [ -z "$ACCESS_TOKEN" ]; then
+  echo "Not logged in to Supabase. Running 'supabase login' (opens browser)..."
+  supabase login
+  # Re-read token after login
+  case "$(uname -s)" in
+    Darwin)
+      RAW=$(security find-generic-password -s "Supabase CLI" -w 2>/dev/null || true)
+      B64=${RAW#go-keyring-base64:}
+      ACCESS_TOKEN=$(echo "$B64" | base64 -D 2>/dev/null || echo "$B64" | base64 --decode 2>/dev/null || echo "")
+      ;;
+    Linux)
+      for tokfile in \
+        "$HOME/.supabase/access-token" \
+        "$XDG_CONFIG_HOME/supabase/access-token" \
+        "$HOME/.config/supabase/access-token"; do
+        [ -f "$tokfile" ] && ACCESS_TOKEN="$(cat "$tokfile")" && break
+      done
+      ;;
+  esac
+fi
+
+[ -z "$ACCESS_TOKEN" ] && { echo "FATAL: could not obtain access token after login"; exit 1; }
+echo "✅ Access token obtained (length: ${#ACCESS_TOKEN})"
+```
+
+## Step 5 — Pick organization
+
+```bash
+ORGS_JSON=$(curl -s -H "Authorization: Bearer $ACCESS_TOKEN" "https://api.supabase.com/v1/organizations")
+ORG_COUNT=$(echo "$ORGS_JSON" | jq 'length')
+echo "Found $ORG_COUNT organization(s):"
+echo "$ORGS_JSON" | jq -r '.[] | "  - \(.id)  (\(.name))"'
+```
+
+If `ORG_COUNT` is 1 → auto-select that one. If multiple → ask the user
+which one (use `AskUserQuestion` listing org names as options). **Do not
+ask twice.**
+
+```bash
+# Set ORG_ID based on selection
+ORG_ID="<selected-id>"
+```
+
+## Step 6 — Create the project
+
+```bash
+PROJECT_NAME="${SKILL_NAME}-telemetry"
+DB_PASS=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-24)
+
+# Save password for `supabase link` later. NOT committed.
+mkdir -p "$TARGET/telemetry"
+echo "$DB_PASS" > "$TARGET/telemetry/.db-password"
+chmod 600 "$TARGET/telemetry/.db-password"
+
+# Create. DON'T specify --size — that flag only works on paid plans
+# (dogfood confirmed: free tier returns "Instance size cannot be
+# specified for free plan organizations").
+echo "Creating project '$PROJECT_NAME' in org $ORG_ID..."
+supabase projects create "$PROJECT_NAME" \
+  --org-id "$ORG_ID" \
+  --db-password "$DB_PASS" \
+  --region us-east-1 2>&1 | tee /tmp/.add-tel-create-out
+
+PROJECT_REF=$(grep -oE 'project/[a-z]{20}' /tmp/.add-tel-create-out | head -1 | cut -d/ -f2)
+rm -f /tmp/.add-tel-create-out
+
+if [ -z "$PROJECT_REF" ]; then
+  echo "FATAL: couldn't parse project ref from create output"
+  exit 1
+fi
+echo "✅ Project created: $PROJECT_REF"
+```
+
+If the user's free tier is full (2-project cap), tell them:
+"Your Supabase free tier has 2 projects already. Either delete one at
+https://supabase.com/dashboard or upgrade to Pro." Then exit. Do not
+auto-delete anything.
+
+## Step 7 — Wait for project to be ready + fetch API keys
+
+```bash
+echo "Waiting for project to provision..."
+for i in 1 2 3 4 5 6 7 8; do
+  KEYS_JSON=$(supabase projects api-keys --project-ref "$PROJECT_REF" --output json 2>/dev/null || echo "[]")
+  if echo "$KEYS_JSON" | jq -e '.[0].api_key' >/dev/null 2>&1; then
+    echo "✅ Project ready after $((i*15))s"
+    break
+  fi
+  sleep 15
+done
+
+# Extract the publishable (anon) key — prefer the new sb_publishable_ format
+ANON_KEY=$(echo "$KEYS_JSON" | jq -r '.[] | select(.name == "default" and (.api_key | startswith("sb_publishable"))) | .api_key' | head -1)
+# Fallback to JWT-format anon key if no sb_publishable_
+[ -z "$ANON_KEY" ] && ANON_KEY=$(echo "$KEYS_JSON" | jq -r '.[] | select(.name == "anon") | .api_key' | head -1)
+
+if [ -z "$ANON_KEY" ]; then
+  echo "FATAL: couldn't extract anon key"
+  echo "$KEYS_JSON" | jq -r '.[] | "  \(.name): \(.api_key)"'
+  exit 1
+fi
+
+PROJECT_URL="https://${PROJECT_REF}.supabase.co"
+echo "✅ URL: $PROJECT_URL"
+echo "✅ Anon key: ${ANON_KEY:0:20}..."
+```
+
+## Step 8 — Copy template files
 
 ```bash
 mkdir -p "$TARGET/telemetry"
@@ -128,159 +300,99 @@ cp     "$SRC/SKILL.md.snippet"    "$TARGET/telemetry/"
 cp     "$SRC/PRIVACY.md"          "$TARGET/telemetry/"
 chmod +x "$TARGET/telemetry/bin/"*
 
-# Verify
 [ -x "$TARGET/telemetry/bin/telemetry-log" ] || { echo "FATAL: copy failed"; exit 1; }
-echo "Copied template to $TARGET/telemetry/"
+echo "✅ Copied template files to $TARGET/telemetry/"
 ```
 
-## Step 4 — Get Supabase credentials (THE single question)
+## Step 9 — Write config.sh + run schema via Management API
 
-Output **exactly this** to the user, then wait for one response:
-
-```
-I need your Supabase Project URL and anon public key. Paste both — any
-format works (one line, two lines, "url=... key=..."). I'll figure it out.
-
-Don't have a project yet? Create one (30 seconds, free tier):
-  https://supabase.com/dashboard → New project
-
-To find the values: Settings → API → Project URL + anon public key.
-```
-
-When the user responds, parse with **permissive regex**. Accept any of:
-
-- `https://([a-z0-9]+)\.supabase\.co` for URL
-- A bare token starting with `sb_publishable_` or `sb_` for the new format
-- A long token starting with `eyJ` for the legacy JWT format
-- Order doesn't matter; whitespace and `=` separators are fine
-
-If you find exactly one URL and one key → proceed. If ambiguous → ask
-ONE focused clarification (which token is the anon key?). Never split
-into multiple questions.
-
-Write the config file:
+**Don't use `supabase db push` or SQL Editor copy-paste.** Use the
+Management API `database/query` endpoint — it's one POST and does the
+whole thing.
 
 ```bash
-URL="<extracted url>"
-KEY="<extracted key>"
-PROJECT_REF="$(echo "$URL" | sed -n 's|https://\([a-z0-9]*\)\.supabase\.co.*|\1|p')"
-
 cat > "$TARGET/telemetry/supabase/config.sh" <<EOF
-export SKILL_TELEMETRY_SUPABASE_URL="$URL"
-export SKILL_TELEMETRY_ANON_KEY="$KEY"
+export SKILL_TELEMETRY_SUPABASE_URL="$PROJECT_URL"
+export SKILL_TELEMETRY_ANON_KEY="$ANON_KEY"
 EOF
+echo "✅ Wrote config.sh"
 
-echo "Wrote $TARGET/telemetry/supabase/config.sh (project: $PROJECT_REF)"
-```
+SCHEMA=$(cat "$TARGET/telemetry/supabase/schema.sql")
+QUERY_JSON=$(jq -n --arg q "$SCHEMA" '{query: $q}')
 
-## Step 5 — Make the user run the SQL schema
+HTTP=$(curl -s -w '%{http_code}' \
+  -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/database/query" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -o /tmp/.add-tel-schema-resp \
+  -d "$QUERY_JSON")
 
-This requires the user to open Supabase dashboard and click. You can't do
-this for them, but you can make it one copy-paste.
-
-Read the schema and embed it directly in your message:
-
-```bash
-SCHEMA_CONTENT="$(cat "$TARGET/telemetry/supabase/schema.sql")"
-```
-
-Output to user:
-
-```
-Open this URL → SQL Editor → New query, paste the SQL, click Run:
-
-  https://supabase.com/dashboard/project/<PROJECT_REF>/sql/new
-
-SQL to paste:
-─────────────────────────────────────────────────
-<SCHEMA_CONTENT>
-─────────────────────────────────────────────────
-
-When done, type 'ok' (or 'done' / 'next'). If it errored, paste the error.
-```
-
-Wait for their response. If they paste an error → diagnose, fix the SQL
-if possible, ask them to re-run. If they say ok → proceed.
-
-**Don't validate the SQL ran successfully here** — Step 8's smoke test
-will tell us definitively. Just trust the user for now.
-
-## Step 6 — Make the user deploy the edge function
-
-Check supabase CLI first:
-
-```bash
-if ! command -v supabase >/dev/null 2>&1; then
-  echo "supabase CLI not installed. Run:"
-  echo "  brew install supabase/tap/supabase     # macOS"
-  echo "  # or see: https://supabase.com/docs/guides/cli"
-  echo "then retry."
+if [ "$HTTP" = "201" ] || [ "$HTTP" = "200" ]; then
+  echo "✅ Schema deployed (HTTP $HTTP)"
+else
+  echo "FATAL: schema deploy failed (HTTP $HTTP)"
+  cat /tmp/.add-tel-schema-resp
   exit 1
 fi
+rm -f /tmp/.add-tel-schema-resp
 ```
 
-If installed, output to user:
+## Step 10 — Deploy edge function via Management API
 
+**Don't use `supabase functions deploy`.** Dogfood confirmed it hangs on
+"Bundling Function" indefinitely. Use the Management API multipart
+endpoint — much more reliable.
+
+```bash
+FN_PATH="$TARGET/telemetry/supabase/functions/skill-telemetry-ingest/index.ts"
+
+HTTP=$(curl -s -w '%{http_code}' \
+  -X POST "https://api.supabase.com/v1/projects/${PROJECT_REF}/functions/deploy?slug=skill-telemetry-ingest" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -F 'metadata={"name":"skill-telemetry-ingest","verify_jwt":false,"entrypoint_path":"index.ts"};type=application/json' \
+  -F "file=@${FN_PATH};type=application/typescript" \
+  -o /tmp/.add-tel-fn-resp)
+
+if [ "$HTTP" = "201" ] || [ "$HTTP" = "200" ]; then
+  echo "✅ Edge function deployed (HTTP $HTTP)"
+else
+  echo "FATAL: function deploy failed (HTTP $HTTP)"
+  cat /tmp/.add-tel-fn-resp
+  exit 1
+fi
+rm -f /tmp/.add-tel-fn-resp
 ```
-Now run these 3 commands from $TARGET/telemetry/:
 
-  cd $TARGET/telemetry
-  supabase login                                              # one-time, opens browser
-  supabase link --project-ref <PROJECT_REF>
-  supabase functions deploy skill-telemetry-ingest --no-verify-jwt
+## Step 11 — Build customized snippet + append to user's SKILL.md
 
-Type 'ok' when the last command says "Deployed function skill-telemetry-ingest".
-```
-
-`<PROJECT_REF>` was extracted in Step 4.
-
-Wait for confirmation. If they paste an error → diagnose. Common ones:
-- "no organization" → user needs to create org in Supabase dashboard first
-- "function already exists" → harmless, proceed
-- "permission denied" → check `supabase login` actually ran
-
-## Step 7 — Append telemetry block to user's SKILL.md (with diff + auto-yes)
-
-Build the customized snippet by reading the template and substituting:
+The snippet has placeholders `{{SKILL_NAME}}` and `{{TELEMETRY_BIN}}`.
+Substitute them but **also strip the leading HTML comment block** —
+that comment describes the placeholders themselves and gets corrupted
+by the sed substitution (dogfood found this).
 
 ```bash
 TELEMETRY_BIN="$TARGET/telemetry/bin/telemetry-log"
 
-CUSTOMIZED=$(sed \
-  -e "s|{{SKILL_NAME}}|$SKILL_NAME|g" \
-  -e "s|{{TELEMETRY_BIN}}|$TELEMETRY_BIN|g" \
-  "$TARGET/telemetry/SKILL.md.snippet")
-```
+# Strip leading HTML comment then substitute placeholders
+CUSTOMIZED=$(sed -e '/^<!--/,/^-->/d' "$TARGET/telemetry/SKILL.md.snippet" | \
+  sed -e "s|{{SKILL_NAME}}|$SKILL_NAME|g" \
+      -e "s|{{TELEMETRY_BIN}}|$TELEMETRY_BIN|g")
 
-Show the user a preview (last 10 lines of customized snippet) so they
-know what's being added:
+# Preview the last 5 lines of what we're about to append
+echo "Appending telemetry block (last 5 lines preview):"
+echo "$CUSTOMIZED" | tail -5
+echo ""
 
-```
-About to append this to $TARGET/SKILL.md:
-
-  <last 10 lines of CUSTOMIZED>
-
-(Full content is at $TARGET/telemetry/SKILL.md.snippet, customized.)
-```
-
-**Default to yes and proceed** — do not block waiting for "yes". The
-agent execution model can't reliably pause. The action is reversible
-(`git diff` or `tail -100 SKILL.md`), so safe to default-yes.
-
-```bash
+# Default-yes append (action is reversible — `git diff` shows what changed)
 echo "" >> "$TARGET/SKILL.md"
 echo "$CUSTOMIZED" >> "$TARGET/SKILL.md"
-echo "Appended telemetry block to $TARGET/SKILL.md"
+echo "✅ Appended telemetry block to $TARGET/SKILL.md"
 ```
 
-## Step 8 — Smoke test the full pipeline
+## Step 12 — Smoke test the full pipeline
 
-This is the source of truth. Don't claim done until this passes.
-
-**Run this entire block as ONE Bash call.** The variables `$HTTP_CODE` and
-`$RESPONSE_BODY` are set here AND consumed in this same block — they
-won't survive a fresh shell. If you must split, write them to files first
-(see the persistence note at the end of this step).
+**Single Bash call. HTTP_CODE / RESPONSE_BODY are also persisted to
+files so the failure-recovery block below can read them.**
 
 ```bash
 . "$TARGET/telemetry/supabase/config.sh"
@@ -298,8 +410,6 @@ HTTP_CODE=$(curl -s -w '%{http_code}' --max-time 15 \
   -d "[{\"skill\":\"$SKILL_NAME\",\"outcome\":\"success\",\"ts\":\"$TEST_TS\",\"session_id\":\"$TEST_SESSION\"}]")
 
 RESPONSE_BODY="$(cat "$RESP_FILE" 2>/dev/null)"
-
-# Persist for downstream steps (failure path or Step 9)
 echo "$HTTP_CODE" > "$TARGET/.add-telemetry-last-http"
 cp "$RESP_FILE" "$TARGET/.add-telemetry-last-body" 2>/dev/null || true
 rm -f "$RESP_FILE"
@@ -308,135 +418,165 @@ echo "HTTP $HTTP_CODE"
 echo "Response: $RESPONSE_BODY"
 ```
 
-**If you must read these in a later Bash call:**
-
-```bash
-HTTP_CODE="$(cat "$TARGET/.add-telemetry-last-http" 2>/dev/null)"
-RESPONSE_BODY="$(cat "$TARGET/.add-telemetry-last-body" 2>/dev/null)"
-```
-
-**Interpret the result** and tell the user clearly:
-
 | HTTP | Meaning | What to tell user |
 |---|---|---|
-| `200`/`201` with `inserted` in body | ✅ Full pipeline works | Proceed to Step 9 success report |
-| `200` but body says "no valid rows" | ⚠️ Edge function received it but rejected the row | Probably a schema mismatch. Re-check Step 5 — did they actually run the SQL? |
-| `401`/`403` | Auth failed | The anon key in `config.sh` is wrong. Re-do Step 4 |
-| `404` | Edge function missing | They didn't deploy. Re-do Step 6 |
-| `500` | Server error | Most likely: schema not run (Step 5) or wrong service role configuration. Check Supabase edge function logs |
-| `000` / timeout | Network/DNS | Wrong URL. Re-check Step 4. May also be transient — retry once |
+| `200`/`201` with "inserted" | ✅ Pipeline works | Proceed to Step 13 |
+| `200` with "no valid rows" | Schema mismatch | Re-check Step 9 |
+| `401`/`403` | Auth failed | Anon key wrong, re-run Step 7 |
+| `404` | Function missing | Re-run Step 10 |
+| `500` | Server error | Check Supabase edge function logs |
+| `000` / timeout | Network/DNS | Wrong URL, transient — retry once |
 
-If smoke test fails: **tell the user the install is paused, NOT done**.
-The files are in place at `$TARGET/telemetry/`. They can fix the upstream
-issue and re-run `/add-telemetry` to retry just Step 8 (the meta-skill
-will detect the existing install and only re-validate).
-
-**Compute elapsed time + clean up sentinel BEFORE exiting on failure:**
+**On Step 8 failure path** (move sentinel cleanup here too):
 
 ```bash
 SENTINEL="$TARGET/.add-telemetry-start"
 START=$(cat "$SENTINEL" 2>/dev/null || echo "$(date +%s)")
 END=$(date +%s)
 ELAPSED=$(( END - START ))
-
-# Capture HTTP code/body even if we're in a fresh shell
 HTTP_CODE="${HTTP_CODE:-$(cat "$TARGET/.add-telemetry-last-http" 2>/dev/null)}"
 RESPONSE_BODY="${RESPONSE_BODY:-$(cat "$TARGET/.add-telemetry-last-body" 2>/dev/null)}"
 
-# Write a structured failure log for diagnostics
 cat >> "$TARGET/telemetry/.install-failure-log" <<EOF
-$(date -u +%Y-%m-%dT%H:%M:%SZ) step=8 http=${HTTP_CODE:-unknown} body=${RESPONSE_BODY:-empty} elapsed=$ELAPSED
+$(date -u +%Y-%m-%dT%H:%M:%SZ) step=12 http=${HTTP_CODE:-unknown} body=${RESPONSE_BODY:-empty} elapsed=$ELAPSED
 EOF
 
-# Clean up all install-time scratch files
 rm -f "$SENTINEL" "$TARGET/.add-telemetry-last-http" "$TARGET/.add-telemetry-last-body"
-
 echo "Install paused after ${ELAPSED}s. Re-run /add-telemetry after fixing the upstream issue."
 echo "Failure log: $TARGET/telemetry/.install-failure-log"
 ```
 
-The sentinel cleanup MUST happen in both the success path (Step 9) and
-this failure path. Don't leak it.
-
-## Step 9 — Final report
-
-Only reach this if Step 8 returned 200.
-
-Compute install duration:
+## Step 13 — Final report (Path A)
 
 ```bash
 SENTINEL="$TARGET/.add-telemetry-start"
 START=$(cat "$SENTINEL" 2>/dev/null || echo "$(date +%s)")
 END=$(date +%s)
 ELAPSED=$(( END - START ))
-
-# Clean up all install-time scratch files (mirror the failure path)
-rm -f "$SENTINEL" "$TARGET/.add-telemetry-last-http" "$TARGET/.add-telemetry-last-body"
+rm -f "$SENTINEL" "$TARGET/.add-telemetry-last-http" "$TARGET/.add-telemetry-last-body" \
+      "$TARGET/telemetry/.db-password"
 ```
+
+Tell the user:
+
+```
+✅ Telemetry installed for $SKILL_NAME in $ELAPSED seconds.
+
+Project: $PROJECT_URL
+Files: $TARGET/telemetry/
+SKILL.md: telemetry block appended at end
+Smoke test: HTTP $HTTP_CODE — one row in skill_events
+
+See your data:
+  https://supabase.com/dashboard/project/$PROJECT_REF/editor
+  Useful views: skill_usage_summary, skill_failure_modes, skill_daily_usage
+
+Users opt out via: export SKILL_TELEMETRY=off
+
+Privacy text for your README:
+  $TARGET/telemetry/PRIVACY.md  (paste into your README's privacy section)
+```
+
+---
+
+# Path B — Manual install (existing Supabase project)
+
+Use this when the user already has a Supabase project + keys and just
+wants to wire it up. Skip Path A entirely; this path doesn't need the
+Supabase CLI or any API calls beyond the smoke test.
+
+## Step 3-B — Get Supabase credentials (one question)
+
+Tell the user:
+
+```
+I need your Supabase Project URL and anon public key. Paste both —
+any format works (one line, two lines, "url=... key=..."). I'll
+figure it out.
+
+To find them: dashboard → Settings → API → Project URL + anon public.
+```
+
+Parse with permissive regex (see Path A Step 4 for patterns). Resolve
+into:
+
+```bash
+URL="<extracted url>"
+ANON_KEY="<extracted key>"
+PROJECT_REF="$(echo "$URL" | sed -n 's|https://\([a-z0-9]*\)\.supabase\.co.*|\1|p')"
+```
+
+Then write config and copy template:
+
+```bash
+mkdir -p "$TARGET/telemetry"
+cp -r  "$SRC/bin"              "$TARGET/telemetry/"
+cp -r  "$SRC/supabase"         "$TARGET/telemetry/"
+cp     "$SRC/SKILL.md.snippet" "$TARGET/telemetry/"
+cp     "$SRC/PRIVACY.md"       "$TARGET/telemetry/"
+chmod +x "$TARGET/telemetry/bin/"*
+
+cat > "$TARGET/telemetry/supabase/config.sh" <<EOF
+export SKILL_TELEMETRY_SUPABASE_URL="$URL"
+export SKILL_TELEMETRY_ANON_KEY="$ANON_KEY"
+EOF
+```
+
+## Step 4-B — User runs schema + deploys edge function manually
 
 Output to user:
 
 ```
-✅ Telemetry installed for {{SKILL_NAME}} in $ELAPSED seconds.
+Two manual steps in your dashboard:
 
-What just happened:
-  - Files: $TARGET/telemetry/  (bin, supabase config, snippet)
-  - SKILL.md: telemetry block appended at end
-  - Smoke test: HTTP 200, one row in skill_events
-  - Test row session_id: $TEST_SESSION (delete if you want to clean up)
+1. SQL Editor → New query, paste this:
+$(cat "$TARGET/telemetry/supabase/schema.sql")
 
-Where to see your data:
-  https://supabase.com/dashboard/project/$PROJECT_REF/editor
-  Table: skill_events
-  Useful views: skill_usage_summary, skill_failure_modes, skill_daily_usage
+2. After SQL succeeds, deploy the edge function:
+   cd $TARGET/telemetry
+   supabase login                          # if not done
+   supabase link --project-ref $PROJECT_REF
+   supabase functions deploy skill-telemetry-ingest --no-verify-jwt
 
-How users disable telemetry:
-  export SKILL_TELEMETRY=off
-
-Privacy text for your README:
-  $TARGET/telemetry/PRIVACY.md  (paste into your README's privacy section)
-
-Next time you use your skill normally, a real event will land in
-skill_events. Open the dashboard in a minute and see.
+Type 'ok' when both are done.
 ```
 
-Then record your own telemetry event (if add-telemetry has been
-instrumented on itself — see Step 10).
+Wait for ack.
 
-## Step 10 — Self-telemetry (only if you've been instrumented)
+## Step 5-B onwards
 
-This is a no-op until add-telemetry has been instrumented on itself.
-Once /add-telemetry runs on its own directory, the snippet appended to
-THIS SKILL.md will substitute the absolute path here.
+Continue at Step 11 (append SKILL.md) and Step 12 (smoke test) above.
+Both paths converge here.
 
-For now, this is just a placeholder section. After self-instrumentation,
-a real "Telemetry (do not skip)" block will live below this comment.
+---
 
 ## What you should NEVER do
 
-- **Never ask a question you could answer by reading a file.** If you
-  catch yourself about to ask "what's the skill name", check SKILL.md
-  frontmatter first.
-- **Never split one piece of information into multiple questions.** URL
-  and key go together; ask for both at once.
-- **Never overwrite SKILL.md without first showing a preview** of what
-  you're appending.
-- **Never claim done without Step 8 passing.** A green Step 8 is the
-  only honest success signal.
-- **Never block forever on "yes/no" prompts.** Default to yes when the
-  action is reversible (file append, config write). Default to stop
-  only on destructive actions (none in this skill).
+- **Never ask a question you could answer by reading a file.** Skill
+  name from frontmatter; org from `orgs list`; CLI presence from
+  `command -v`.
+- **Never split one piece of info into multiple questions.** URL+key
+  together. Path A or B together.
+- **Never overwrite SKILL.md without showing a preview** of what's
+  being appended.
+- **Never claim done without Step 12 passing.** Green smoke test is
+  the only honest success signal.
+- **Never block forever on "yes/no" prompts.** Default to yes when
+  reversible (file append, config write). Default to stop only on
+  destructive actions (none here).
+- **Never use `supabase functions deploy` CLI.** It hangs at "Bundling
+  Function" indefinitely. Use Management API multipart instead.
+- **Never use `--size` flag on `supabase projects create`.** Free tier
+  rejects it.
 
 ## On failure
 
-Whatever step fails:
-
-1. Log the error context to `$TARGET/telemetry/.install-failure-log`
-   with timestamp + step number + observed output.
+1. Log error context to `$TARGET/telemetry/.install-failure-log` with
+   timestamp + step number + observed output.
 2. Tell the user **exactly** which step failed and what to fix.
-3. Tell them re-running `/add-telemetry` is safe (idempotent) — Step 2
-   detects partial installs and resumes from the right place.
-4. Do NOT leave inconsistent state: if Step 7 (SKILL.md append) is the
-   one that fails, the files in `telemetry/` are inert (no SKILL.md
-   references them), so the partial install does nothing — safe to
-   leave or `rm -rf telemetry/`.
+3. Tell them re-running `/add-telemetry` is safe — Step 2 detects
+   partial installs and resumes from the right place.
+4. Don't leave inconsistent state. If Step 11 (SKILL.md append) fails,
+   the files in `telemetry/` are inert (no SKILL.md references them),
+   so the partial install does nothing — safe to leave or
+   `rm -rf telemetry/`.
