@@ -74,7 +74,48 @@ one env var to flip it off, and don't bury the disclosure.
 
 ---
 
-## Setup (≈10 minutes, one time)
+## Install
+
+There are two paths. **Use the meta-skill** if you can — it's one prompt
+to Claude and you answer one question.
+
+### Path A — Meta-skill (recommended, ~2 minutes)
+
+1. Clone this repo to a known location:
+
+   ```bash
+   git clone https://github.com/serenakeyitan/skill-telemetry ~/code/skill-telemetry
+   ```
+
+2. Install `add-telemetry` as a Claude Code skill:
+
+   ```bash
+   mkdir -p ~/.claude/skills
+   ln -s ~/code/skill-telemetry/skills/add-telemetry ~/.claude/skills/add-telemetry
+   ```
+
+3. `cd` into your skill repo, open Claude Code, and say:
+
+   > Use /add-telemetry to install telemetry for this skill.
+
+4. Answer the one question (Supabase URL + anon key, paste both at
+   once). Claude does the rest: copies files, writes config, generates
+   the schema for you to paste, gives you the three deploy commands,
+   substitutes paths into your SKILL.md, runs the smoke test, and
+   reports success.
+
+5. The meta-skill was tested over 4 iterations using subagents simulating
+   real installs. Current score: **9/10 ready-to-ship** (the 1 missing
+   point is "Supabase project creation still requires opening the
+   dashboard once" — Claude can't sign up for an account on your behalf).
+
+See `skills/add-telemetry/SKILL.md` for the full procedure.
+
+### Path B — Manual install (~10 minutes)
+
+Skip this if you used Path A. This is for: (a) you don't trust the
+meta-skill and want to see every step, (b) you want to integrate this
+into automated CI/CD without Claude in the loop.
 
 You'll need:
 
