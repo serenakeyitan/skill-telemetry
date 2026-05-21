@@ -88,14 +88,41 @@ echo "Target: $TARGET"
 echo "Skill name: $SKILL_NAME"
 ```
 
-## Step 2 — Idempotency
+## Step 2 — Idempotency + author-suite-pool detection
 
 ```bash
 ALREADY_INSTALLED=0
 [ -d "$TARGET/telemetry" ] && [ -f "$TARGET/telemetry/bin/telemetry-log" ] && ALREADY_INSTALLED=1
 grep -q "telemetry-log" "$TARGET/SKILL.md" 2>/dev/null && SKILL_MD_WIRED=1 || SKILL_MD_WIRED=0
 echo "ALREADY_INSTALLED=$ALREADY_INSTALLED, SKILL_MD_WIRED=$SKILL_MD_WIRED"
+
+# Author-suite-pool detection (gstack-style):
+# Look for an existing telemetry config from any other skill the user
+# already instrumented. If found, reuse it — author's data goes to ONE
+# pool, not one-pool-per-skill.
+EXISTING_AUTHOR_CONFIG=""
+for cand in $HOME/.claude/skills/*/telemetry/supabase/config.sh; do
+  if [ -f "$cand" ] && [ "$cand" != "$TARGET/telemetry/supabase/config.sh" ]; then
+    EXISTING_AUTHOR_CONFIG="$cand"
+    break
+  fi
+done
+
+if [ -n "$EXISTING_AUTHOR_CONFIG" ]; then
+  echo "FOUND_AUTHOR_POOL: $EXISTING_AUTHOR_CONFIG"
+  # Source it to peek at the URL
+  AUTHOR_URL=$(grep -oE 'https://[a-z0-9]+\.supabase\.co' "$EXISTING_AUTHOR_CONFIG" | head -1)
+  echo "AUTHOR_POOL_URL: $AUTHOR_URL"
+fi
 ```
+
+**Decision tree** (the meta-skill applies silently):
+
+- Fresh install + no author pool → Path A creates new Supabase project
+- Fresh install + author pool exists → **default: reuse the pool**
+  (ask user only if you want to override; the gstack model is one pool
+  per author, not one per skill)
+- Re-install → re-validate config, skip Step 7 (copy already done)
 
 Decisions (apply silently):
 - Both 0 → fresh install, proceed normally
@@ -226,9 +253,25 @@ ask twice.**
 ORG_ID="<selected-id>"
 ```
 
-## Step 6 — Create the project
+## Step 6 — Create the project (or reuse author's existing pool)
+
+**Author-suite-pool short-circuit**: if Step 2 found an existing author
+pool, **copy the config** instead of creating a new project. Author
+sees all their skills' data in one Supabase, exactly like gstack.
 
 ```bash
+if [ -n "$EXISTING_AUTHOR_CONFIG" ]; then
+  mkdir -p "$TARGET/telemetry/supabase"
+  cp "$EXISTING_AUTHOR_CONFIG" "$TARGET/telemetry/supabase/config.sh"
+  # Extract project ref from URL for downstream steps
+  PROJECT_URL=$(grep -oE 'https://[a-z0-9]+\.supabase\.co' "$TARGET/telemetry/supabase/config.sh" | head -1)
+  PROJECT_REF=$(echo "$PROJECT_URL" | sed -n 's|https://\([a-z0-9]*\)\.supabase\.co.*|\1|p')
+  ANON_KEY=$(grep -oE 'sb_publishable_[A-Za-z0-9_]+|eyJ[A-Za-z0-9._-]+' "$TARGET/telemetry/supabase/config.sh" | head -1)
+  echo "✅ Reusing author pool: $PROJECT_URL"
+  echo "   (skipping project create, schema deploy, edge function deploy — already done)"
+  # Skip directly to Step 8 (copy template files)
+else
+  # Original Step 6: create new project
 PROJECT_NAME="${SKILL_NAME}-telemetry"
 DB_PASS=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-24)
 
@@ -260,6 +303,8 @@ If the user's free tier is full (2-project cap), tell them:
 "Your Supabase free tier has 2 projects already. Either delete one at
 https://supabase.com/dashboard or upgrade to Pro." Then exit. Do not
 auto-delete anything.
+
+fi   # end "no existing author pool" branch
 
 ## Step 7 — Wait for project to be ready + fetch API keys
 

@@ -36,6 +36,20 @@ const MAX_SKILL_VERSION_LEN = 40;
 const MAX_SESSION_LEN = 200;
 const MAX_OS_LEN = 20;
 const MAX_ARCH_LEN = 20;
+const MAX_EVENT_TYPE_LEN = 30;
+const MAX_SOURCE_LEN = 10;
+
+const ALLOWED_EVENT_TYPES = new Set([
+  "skill_run",
+  "upgrade_prompted",
+  "consent_prompted",
+  "consent_granted",
+  "consent_declined",
+  "opt_out",
+  "first_run",
+]);
+
+const ALLOWED_SOURCES = new Set(["live", "replay"]);
 
 type IncomingEvent = {
   v?: number;                       // schema version, v2+
@@ -52,6 +66,9 @@ type IncomingEvent = {
   installation_id?: string | null;
   os?: string | null;               // v2
   arch?: string | null;             // v2
+  event_type?: string | null;       // v3
+  sessions?: number | null;         // v3
+  source?: string | null;           // v3
 };
 
 function clampStr(v: unknown, max: number): string | null {
@@ -88,11 +105,34 @@ function sanitize(e: IncomingEvent): Record<string, unknown> | null {
     installId = e.installation_id.toLowerCase();
   }
 
-  // Schema version: accept 1 or 2; default 1 for legacy clients
+  // Schema version: accept 1, 2, or 3; default 1 for legacy clients
   let schemaVersion = 1;
-  if (typeof e.v === "number" && Number.isInteger(e.v) && e.v >= 1 && e.v <= 2) {
+  if (typeof e.v === "number" && Number.isInteger(e.v) && e.v >= 1 && e.v <= 3) {
     schemaVersion = e.v;
   }
+
+  // event_type: must be in the allowlist; default skill_run
+  const eventType =
+    typeof e.event_type === "string" && ALLOWED_EVENT_TYPES.has(e.event_type)
+      ? e.event_type
+      : "skill_run";
+
+  // sessions: positive small int, sanity-cap at 100
+  let sessions: number | null = null;
+  if (
+    typeof e.sessions === "number" &&
+    Number.isInteger(e.sessions) &&
+    e.sessions >= 1 &&
+    e.sessions <= 100
+  ) {
+    sessions = e.sessions;
+  }
+
+  // source: must be in allowlist; default live
+  const source =
+    typeof e.source === "string" && ALLOWED_SOURCES.has(e.source)
+      ? e.source
+      : "live";
 
   // v1 backward-compat: error_detail → error_message if v2 fields empty
   const errorClass = clampStr(e.error_class, MAX_ERROR_CLASS_LEN);
@@ -114,16 +154,19 @@ function sanitize(e: IncomingEvent): Record<string, unknown> | null {
     ts: typeof e.ts === "string" ? e.ts : new Date().toISOString(),
     skill: e.skill.slice(0, MAX_SKILL_LEN),
     skill_version: clampStr(e.skill_version, MAX_SKILL_VERSION_LEN),
+    event_type: eventType,
     outcome,
     duration_s: duration,
     error_class: errorClass,
     error_message: errorMessage,
-    error_detail: errorDetail, // kept null for v2 clients; populated for v1
+    error_detail: errorDetail, // kept null for v2+ clients; populated for v1
     step: clampStr(e.step, MAX_STEP_LEN),
     session_id: clampStr(e.session_id, MAX_SESSION_LEN),
     installation_id: installId,
     os: cleanPlatform(e.os, MAX_OS_LEN),
     arch: cleanPlatform(e.arch, MAX_ARCH_LEN),
+    sessions,
+    source,
   };
 }
 

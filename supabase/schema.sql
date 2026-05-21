@@ -27,7 +27,13 @@ alter table skill_events
   add column if not exists arch           text,         -- arm64 | x86_64 | ...
   add column if not exists skill_version  text,         -- e.g. "0.1.55"
   add column if not exists error_class    text,         -- low-cardinality tag
-  add column if not exists error_message  text;         -- high-cardinality detail
+  add column if not exists error_message  text,         -- high-cardinality detail
+  -- v0.3.0 additions (gstack parity)
+  add column if not exists event_type     text default 'skill_run',
+                                                        -- skill_run | upgrade_prompted | consent_prompted | ...
+  add column if not exists sessions       smallint,     -- concurrent active sessions at event time
+  add column if not exists source         text default 'live';
+                                                        -- live | replay (telemetry-sync replays)
 
 -- For existing pools where error_detail was used as a combined field,
 -- migrate it into error_message so dashboards keep working.
@@ -51,6 +57,9 @@ create index if not exists skill_events_error_class
 
 create index if not exists skill_events_skill_version
   on skill_events (skill, skill_version);
+
+create index if not exists skill_events_event_type
+  on skill_events (skill, event_type, ts desc);
 
 -- ─── Row-level security ─────────────────────────────────────
 -- The anon key is PUBLIC (committed in skill code). RLS denies all
@@ -120,9 +129,24 @@ select
   count(distinct installation_id) as installs,
   count(*) filter (where outcome = 'error') as errors
 from skill_events
-where os is not null
+where os is not null and event_type = 'skill_run'
 group by skill, os, arch
 order by skill, runs desc;
+
+-- Lifecycle events — see consent prompts, upgrade nudges, opt-outs.
+-- Anything that's not a skill_run goes here.
+create or replace view skill_lifecycle_events as
+select
+  skill,
+  event_type,
+  step,
+  count(*) as count,
+  count(distinct installation_id) as distinct_machines,
+  max(ts) as last_seen
+from skill_events
+where event_type is not null and event_type <> 'skill_run'
+group by skill, event_type, step
+order by skill, count desc;
 
 -- Per-day usage
 create or replace view skill_daily_usage as
@@ -157,6 +181,7 @@ returns table (
   schema_version  smallint,
   skill           text,
   skill_version   text,
+  event_type      text,
   outcome         text,
   duration_s      integer,
   step            text,
@@ -165,7 +190,9 @@ returns table (
   session_id      text,
   installation_id uuid,
   os              text,
-  arch            text
+  arch            text,
+  sessions        smallint,
+  source          text
 ) language sql stable as $$
   select
     id,
@@ -174,6 +201,7 @@ returns table (
     schema_version,
     skill,
     skill_version,
+    coalesce(event_type, 'skill_run') as event_type,
     outcome,
     duration_s,
     step,
@@ -183,7 +211,9 @@ returns table (
     session_id,
     installation_id,
     os,
-    arch
+    arch,
+    sessions,
+    coalesce(source, 'live') as source
   from skill_events
   order by ts desc;
 $$;

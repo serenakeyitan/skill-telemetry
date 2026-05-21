@@ -110,11 +110,38 @@ UNSENT="$(tail -n "+$SKIP" "$JSONL_FILE" 2>/dev/null || true)"
 BATCH="["
 FIRST=true
 COUNT=0
+NOW_EPOCH=$(date +%s)
 while IFS= read -r LINE; do
   [ -z "$LINE" ] && continue
   echo "$LINE" | grep -q '^{' || continue
+
+  # ── Strip local-only fields before sending (gstack parity) ──
+  # _repo_slug and _branch stay on the user's machine for their own
+  # debugging. Author sees nothing of which repo the user was in.
+  CLEAN_LINE=$(echo "$LINE" | sed \
+    -e 's/,"_repo_slug":"[^"]*"//g' \
+    -e 's/,"_repo_slug":null//g' \
+    -e 's/,"_branch":"[^"]*"//g' \
+    -e 's/,"_branch":null//g')
+
+  # ── Mark as "replay" if event is >5 minutes old ─────────────
+  # telemetry-log writes source="live"; if we're sending an event
+  # whose ts is stale, flip to "replay" so the author can tell
+  # real-time activity apart from catchup syncs.
+  EVENT_TS=$(echo "$CLEAN_LINE" | sed -n 's/.*"ts":"\([^"]*\)".*/\1/p')
+  if [ -n "$EVENT_TS" ]; then
+    # Try GNU date first, then BSD date (macOS)
+    EVENT_EPOCH=$(date -d "$EVENT_TS" +%s 2>/dev/null || \
+                  date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EVENT_TS" +%s 2>/dev/null || \
+                  echo "$NOW_EPOCH")
+    AGE=$(( NOW_EPOCH - EVENT_EPOCH ))
+    if [ "$AGE" -gt 300 ]; then
+      CLEAN_LINE=$(echo "$CLEAN_LINE" | sed 's/"source":"live"/"source":"replay"/')
+    fi
+  fi
+
   if [ "$FIRST" = "true" ]; then FIRST=false; else BATCH="$BATCH,"; fi
-  BATCH="$BATCH$LINE"
+  BATCH="$BATCH$CLEAN_LINE"
   COUNT=$(( COUNT + 1 ))
   [ "$COUNT" -ge 100 ] && break
 done <<< "$UNSENT"
