@@ -1,18 +1,32 @@
-# skill-telemetry
+# skill-telemetry — Google Analytics for your Claude Code skill
 
-A drop-in telemetry kit for a single Claude Code skill, so the author
-can see how their skill is actually being used and what breaks.
+**You shipped a Claude Code skill. You have no idea if anyone uses it,
+where it breaks, or whether your last change made it worse. This fixes
+that.**
 
-**Status**: Early, working, opinionated. Read [ARCHITECTURE.md](./ARCHITECTURE.md)
-for why it's designed this way.
+Drop it into your skill, point it at your own database, and every run
+reports back: which feature was used, did it succeed, how long it took,
+what errored. Your data, your Supabase — nothing goes to us.
 
-**License**: MIT. If Anthropic ships official skill analytics (see
-[anthropics/claude-code#35319](https://github.com/anthropics/claude-code/issues/35319)),
-this retires gracefully.
+```
+TIME                 SKILL  EVENT      OUTCOME  STEP     DUR  ERR_CLASS
+2026-05-22 09:14:02  tdoc   skill_run  success  publish  87
+2026-05-22 09:02:31  tdoc   skill_run  error    publish  12   cloudflare_timeout
+2026-05-22 08:47:55  tdoc   skill_run  success  edit     34
+```
+
+That's the whole pitch. Skill authors are flying blind today — Claude
+Code doesn't surface per-skill usage to the people who write skills.
+This is the stopgap until it does.
+
+**Status**: Working, dogfooded on a real skill (tdoc). MIT licensed —
+if Anthropic ships official skill analytics
+([anthropics/claude-code#35319](https://github.com/anthropics/claude-code/issues/35319)),
+this retires gracefully. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design.
 
 ---
 
-## Who this is for
+## The painpoint, concretely
 
 You are a Claude Code skill author. You wrote a skill, people installed it,
 and you want to know:
@@ -372,15 +386,45 @@ delete the `telemetry/` directory. Users can `rm -rf ~/.<your-skill>/`.
 See [ARCHITECTURE.md](./ARCHITECTURE.md). Short version: Claude Code's
 Stop hook doesn't include the skill name, and inferring it from
 transcripts is unreliable. Having the skill explicitly self-report is
-the only architecture that's actually accurate, and it sidesteps the
+the only architecture that's accurate per-skill, and it sidesteps the
 big open question of issue #35319.
+
+## How reliable is it? (read this before adopting)
+
+Honest answer: **not 100%, but self-healing.**
+
+The telemetry is recorded by your skill's own SKILL.md — Claude (the
+model) executes it. Claude *can* skip it: especially for proactive
+skills (auto-invoked, not run as step-by-step workflows), Claude
+sometimes does the work and skips the telemetry block as "boilerplate".
+
+This kit fights that with two layers:
+
+1. **Framing** — the SKILL.md telemetry blocks are written as
+   mandatory, numbered Steps with an explicit "treat this as
+   executable instructions" directive, which sharply cuts the skip rate.
+2. **Self-healing `.pending` marker** — the preamble writes a marker;
+   the final step deletes it. If Claude skips the final step, the
+   marker is left behind, and the *next* run reaps it — recording the
+   skipped run as `outcome=unknown`. So a skipped run becomes a
+   degraded event, not a vanished one.
+
+What this is NOT: a Claude Code Stop hook. A Stop hook (runtime-enforced)
+would be 100% skip-proof, but it requires editing the user's global
+`~/.claude/settings.json` — we deliberately avoid that to stay
+self-contained (`git clone` and it works, nothing touched outside the
+skill). If you query your data and see a high share of
+`outcome=unknown`, that's the signal the framing isn't enough for your
+skill and a hook is worth the footprint.
 
 ## Acknowledgements
 
-The telemetry-sync cursor pattern (write-locally-first, batch-push, never
-double-send) is borrowed from [gstack](https://github.com/garrytan/gstack)'s
-implementation. This template adapts it to single-skill use and removes
-gstack's multi-tier model.
+The cursor-based sync (write-locally-first, batch-push, never
+double-send), the `.pending` self-healing marker, and the
+"treat the skill file as executable instructions" framing are all
+borrowed from [gstack](https://github.com/garrytan/gstack). This
+template adapts them to single-skill use and removes gstack's
+multi-tier model.
 
 ## License
 

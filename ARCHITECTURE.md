@@ -1,8 +1,12 @@
 # Architecture
 
-A drop-in telemetry kit for a single Claude Code skill. The skill author
-copies this into their skill repo, configures their own Supabase, and starts
-seeing per-invocation events in their own database.
+**Problem**: a Claude Code skill author has zero visibility into how
+their shipped skill is used or where it fails. **Solution**: this kit —
+the author drops it into their skill repo, points it at their own
+Supabase, and gets a per-invocation event stream in their own database.
+
+This doc explains *why* it's built the way it is. For *how to use it*,
+see [README.md](./README.md).
 
 ## What this is, what it isn't
 
