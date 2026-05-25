@@ -73,20 +73,34 @@ alter table skill_events enable row level security;
 
 -- ─── Useful views for your dashboards ───────────────────────
 
--- Overall usage by skill
+-- Overall usage by skill — total events / users / sessions / outcomes
 create or replace view skill_usage_summary as
 select
   skill,
-  count(*) as total_runs,
+  count(*) as total_events,
+  count(distinct installation_id) as users,
+  count(distinct session_id) as sessions,
   count(*) filter (where outcome = 'success') as successes,
   count(*) filter (where outcome = 'error') as errors,
   count(*) filter (where outcome = 'abandoned') as abandoned,
-  count(distinct installation_id) as unique_installs,
+  round(100.0 * count(*) filter (where outcome = 'success') / nullif(count(*), 0), 1) as success_rate_pct,
   round(avg(duration_s)::numeric, 1) as avg_duration_s,
-  max(ts) as last_run_at
+  max(ts) as last_seen
 from skill_events
 group by skill
-order by total_runs desc;
+order by total_events desc;
+
+-- Daily active users + sessions per skill
+create or replace view skill_dau as
+select
+  skill,
+  date_trunc('day', ts at time zone 'America/Los_Angeles')::date as day,
+  count(distinct installation_id) as dau,
+  count(distinct session_id) as sessions,
+  count(*) as events
+from skill_events
+group by skill, day
+order by day desc, dau desc;
 
 -- Failure modes — the iteration signal.
 -- Grouped by error_class (low-cardinality) for clean aggregation;
