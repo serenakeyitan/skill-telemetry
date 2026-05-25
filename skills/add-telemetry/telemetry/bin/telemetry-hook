@@ -85,21 +85,69 @@ elif echo "$LAST_TAIL" | grep -qi 'interrupted\|abort'; then
   OUTCOME="abandoned"
 fi
 
-# ─── Duration via session-start marker ───────────────────────
-# Only computed if the SKILL.md preamble ran AND wrote a marker.
-# If skipped, duration stays null — that's still useful signal
-# (Claude tried to run it, our SKILL.md preamble didn't fire).
-STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${TARGET_SKILL}}"
+# ─── Duration computation ───────────────────────────────────
+# Two strategies in priority order:
+#   1. SKILL.md preamble sentinel (if it ran) — most accurate
+#   2. Transcript timestamps — first→last Skill-tool call for THIS skill.
+#      Approximates "time spent using the skill" even when preamble was
+#      skipped (which is the common case for proactive skills).
 DURATION_ARG=""
+DUR=""
+
+# Strategy 1: sentinel file from preamble
+STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${TARGET_SKILL}}"
 START_FILE="$STATE_DIR/sentinels/$SESSION_ID"
 if [ -f "$START_FILE" ]; then
   START_EPOCH="$(cat "$START_FILE" 2>/dev/null || echo "")"
   if [ -n "$START_EPOCH" ]; then
     DUR=$(( $(date +%s) - START_EPOCH ))
-    [ "$DUR" -ge 0 ] && DURATION_ARG="--duration $DUR"
+    [ "$DUR" -lt 0 ] && DUR=""
     rm -f "$START_FILE" 2>/dev/null || true
   fi
 fi
+
+# Strategy 2: transcript timestamps (fallback when no sentinel).
+# Compute duration as: first Skill:TARGET_SKILL call → last message in
+# this 24h window. The window guard handles long-lived sessions where
+# the same transcript file persists for days (Claude Code reuses
+# transcripts across resumes).
+if [ -z "$DUR" ]; then
+  NOW_EPOCH=$(date +%s)
+  CUTOFF_EPOCH=$(( NOW_EPOCH - 86400 ))  # 24h ago
+
+  # First tdoc skill call timestamp
+  SKILL_TS=$(grep '"skill":"'"$TARGET_SKILL"'"' "$TRANSCRIPT" 2>/dev/null \
+    | grep -oE '"timestamp":"[^"]+"' \
+    | cut -d'"' -f4 \
+    | head -1)
+
+  if [ -n "$SKILL_TS" ]; then
+    SKILL_EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${SKILL_TS%%.*}" "+%s" 2>/dev/null \
+                  || TZ=UTC date -d "$SKILL_TS" "+%s" 2>/dev/null \
+                  || echo "")
+    # Only count it if it's within the last 24h (current session,
+    # not an old reused transcript)
+    if [ -n "$SKILL_EPOCH" ] && [ "$SKILL_EPOCH" -ge "$CUTOFF_EPOCH" ]; then
+      # Find the LAST message timestamp in the whole transcript
+      LAST_TS=$(grep -oE '"timestamp":"[^"]+"' "$TRANSCRIPT" 2>/dev/null \
+        | cut -d'"' -f4 \
+        | tail -1)
+      if [ -n "$LAST_TS" ]; then
+        LAST_EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_TS%%.*}" "+%s" 2>/dev/null \
+                     || TZ=UTC date -d "$LAST_TS" "+%s" 2>/dev/null \
+                     || echo "")
+        if [ -n "$LAST_EPOCH" ]; then
+          DUR=$(( LAST_EPOCH - SKILL_EPOCH ))
+          [ "$DUR" -lt 0 ] && DUR=""
+          # Cap at 24h — single sessions don't run that long
+          [ -n "$DUR" ] && [ "$DUR" -gt 86400 ] && DUR=""
+        fi
+      fi
+    fi
+  fi
+fi
+
+[ -n "$DUR" ] && DURATION_ARG="--duration $DUR"
 
 # ─── Hand off to telemetry-log ──
 # Use event_type=skill_run, source=hook so the author can distinguish
