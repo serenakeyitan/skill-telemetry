@@ -1,0 +1,118 @@
+#!/usr/bin/env bash
+# telemetry-hook — opt-in Claude Code Stop hook for skill-telemetry.
+#
+# Why this exists: Claude (the model) often skips the telemetry-log call
+# in a skill's SKILL.md — especially for proactive skills that auto-invoke
+# without an explicit /skill command. Empirically this means the
+# SKILL.md-based telemetry is unreliable. A Stop hook fires deterministically
+# at the runtime layer regardless of whether Claude read the telemetry block.
+#
+# Privacy model:
+#   - This hook is OPT-IN. It is NOT installed by default. The user
+#     must explicitly run `skill-telemetry install-hook --skill <name>`.
+#   - The hook is FILTERED. It only records events when the named skill
+#     was actually used in that session — it ignores everything else.
+#     If you install a hook for skill 'tdoc' and run 'office-hours' all
+#     day, the tdoc hook records nothing.
+#   - The hook only reads:
+#       - which Skill tool calls happened (skill name only)
+#       - the outcome heuristic (success/error/abandoned via tail -5)
+#       - session_id, working directory basename, duration
+#     It does NOT read your prompts, Claude's replies, file contents,
+#     or any other transcript content.
+#   - All collected data lives in plaintext at ~/.<skill>/telemetry/ so
+#     you can read, audit, or delete it any time.
+#
+# Required env (set in settings.json hook entry):
+#   SKILL_TELEMETRY_HOOK_SKILL   — the skill name to filter by (e.g. "tdoc")
+#   SKILL_TELEMETRY_HOOK_BIN     — path to telemetry-log binary
+#
+# Optional env:
+#   SKILL_TELEMETRY=off          — master kill-switch, overrides everything
+#   SKILL_TELEMETRY_DIR          — override state dir (default: ~/.<skill>)
+
+set -uo pipefail
+
+# Master kill-switch — respects the same env var as telemetry-log
+[ "${SKILL_TELEMETRY:-on}" = "off" ] && exit 0
+
+# Required env
+TARGET_SKILL="${SKILL_TELEMETRY_HOOK_SKILL:-}"
+TEL_BIN="${SKILL_TELEMETRY_HOOK_BIN:-}"
+[ -z "$TARGET_SKILL" ] && exit 0
+[ -x "$TEL_BIN" ] && : || exit 0
+
+# Read the Stop hook payload from stdin
+PAYLOAD="$(cat 2>/dev/null || echo '{}')"
+
+jqget() { echo "$PAYLOAD" | jq -r "$1 // empty" 2>/dev/null || true; }
+
+SESSION_ID="$(jqget '.session_id')"
+TRANSCRIPT="$(jqget '.transcript_path')"
+CWD="$(jqget '.cwd')"
+STOP_REASON="$(jqget '.reason')"
+
+# ─── Scan transcript ONLY for Skill tool invocations ──────────
+# We grep for the literal pattern '"name":"Skill"..."skill":"X"' and
+# nothing else. We do NOT load the transcript into memory or read
+# message content. This is auditable: open this script and verify.
+[ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ] && exit 0
+
+# Find all skill invocations in this session
+INVOKED_SKILLS=$(grep -o '"name":"Skill"[^}]*"skill":"[^"]*"' "$TRANSCRIPT" 2>/dev/null \
+  | grep -o '"skill":"[^"]*"' \
+  | cut -d'"' -f4 \
+  | sort -u || true)
+
+# If TARGET_SKILL was not invoked in this session, exit silently.
+# This is the "skill filtering" responsibility — a hook for tdoc never
+# fires for office-hours sessions.
+echo "$INVOKED_SKILLS" | grep -qx "$TARGET_SKILL" || exit 0
+
+# ─── Last 5 lines outcome heuristic ──────────────────────────
+LAST_TAIL="$(tail -5 "$TRANSCRIPT" 2>/dev/null || true)"
+OUTCOME="completed"
+ERROR_CLASS=""
+ERROR_MESSAGE=""
+
+if echo "$LAST_TAIL" | grep -qi '"is_error":true\|"type":"error"'; then
+  OUTCOME="error"
+  # Pull a short error tag for context — cap at 160 chars hard
+  ERR_TEXT="$(echo "$LAST_TAIL" | grep -o '"text":"[^"]\{0,160\}"' | tail -1 | cut -d'"' -f4 || true)"
+  [ -n "$ERR_TEXT" ] && ERROR_MESSAGE="$ERR_TEXT"
+  ERROR_CLASS="hook_detected_error"
+elif echo "$LAST_TAIL" | grep -qi 'interrupted\|abort'; then
+  OUTCOME="abandoned"
+fi
+
+# ─── Duration via session-start marker ───────────────────────
+# Only computed if the SKILL.md preamble ran AND wrote a marker.
+# If skipped, duration stays null — that's still useful signal
+# (Claude tried to run it, our SKILL.md preamble didn't fire).
+STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${TARGET_SKILL}}"
+DURATION_ARG=""
+START_FILE="$STATE_DIR/sentinels/$SESSION_ID"
+if [ -f "$START_FILE" ]; then
+  START_EPOCH="$(cat "$START_FILE" 2>/dev/null || echo "")"
+  if [ -n "$START_EPOCH" ]; then
+    DUR=$(( $(date +%s) - START_EPOCH ))
+    [ "$DUR" -ge 0 ] && DURATION_ARG="--duration $DUR"
+    rm -f "$START_FILE" 2>/dev/null || true
+  fi
+fi
+
+# ─── Hand off to telemetry-log ──
+# Use event_type=skill_run, source=hook so the author can distinguish
+# hook-captured events from SKILL.md self-reported ones in dashboards.
+"$TEL_BIN" \
+  --skill "$TARGET_SKILL" \
+  --event-type "skill_run" \
+  --outcome "$OUTCOME" \
+  --session-id "${SESSION_ID:-hook-$(date +%s)}" \
+  --step "hook-captured" \
+  ${DURATION_ARG} \
+  ${ERROR_CLASS:+--error-class "$ERROR_CLASS"} \
+  ${ERROR_MESSAGE:+--error-message "$ERROR_MESSAGE"} \
+  2>/dev/null || true
+
+exit 0

@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# telemetry-hook-install — opt-in installer for the skill-telemetry Stop hook.
+#
+# Why this exists: SKILL.md-based telemetry is unreliable (Claude often skips
+# the telemetry block, especially for proactive skills). A Stop hook fires
+# at the runtime layer and captures every session end deterministically.
+#
+# Safety properties (read before running):
+#   - Modifies ~/.claude/settings.json — your global Claude Code config.
+#   - Appends a single Stop hook entry; preserves all existing hooks.
+#   - Idempotent: running twice does NOT create duplicate entries.
+#   - Filtered: the hook only fires when the named skill was actually used
+#     in that session. It will NOT trigger for other skills.
+#   - Uninstall any time with `telemetry-hook-uninstall --skill <name>`.
+#
+# Usage:
+#   telemetry-hook-install --skill tdoc            # install hook for tdoc
+#   telemetry-hook-install --skill tdoc --dry-run  # show what would change
+#
+# What you give it:
+#   --skill <name>      The skill name to filter by. Required.
+#
+# What it changes:
+#   1. Writes a hook entry into ~/.claude/settings.json under hooks.Stop
+#   2. The entry points at this repo's bin/telemetry-hook
+#   3. Passes SKILL_TELEMETRY_HOOK_SKILL=<skill> as env
+
+set -euo pipefail
+
+SKILL=""
+DRY_RUN=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skill) SKILL="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help)
+      head -28 "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -z "$SKILL" ] && { echo "ERROR: --skill <name> required (e.g. --skill tdoc)" >&2; exit 2; }
+
+# Resolve absolute paths
+BIN_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
+HOOK_SCRIPT="$BIN_DIR/telemetry-hook"
+TEL_LOG="$BIN_DIR/telemetry-log"
+
+[ -x "$HOOK_SCRIPT" ] || { echo "FATAL: hook script missing or not executable: $HOOK_SCRIPT" >&2; exit 1; }
+[ -x "$TEL_LOG" ] || { echo "FATAL: telemetry-log missing or not executable: $TEL_LOG" >&2; exit 1; }
+
+# Claude Code settings file
+SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+
+# Build the hook entry as JSON
+HOOK_ENTRY=$(jq -n \
+  --arg cmd "SKILL_TELEMETRY_HOOK_SKILL=$SKILL SKILL_TELEMETRY_HOOK_BIN='$TEL_LOG' '$HOOK_SCRIPT'" \
+  --arg marker "skill-telemetry:$SKILL" \
+  '{
+    hooks: [
+      {
+        type: "command",
+        command: $cmd,
+        timeout: 10,
+        "x-marker": $marker
+      }
+    ]
+  }')
+
+echo "=== Plan ==="
+echo "Settings file:     $SETTINGS"
+echo "Skill:             $SKILL"
+echo "Hook script:       $HOOK_SCRIPT"
+echo "Will inject this hook entry under hooks.Stop:"
+echo "$HOOK_ENTRY" | jq .
+echo ""
+
+if [ "$DRY_RUN" = "1" ]; then
+  echo "(dry-run — nothing written)"
+  exit 0
+fi
+
+# Ensure settings dir + file exist with a minimal valid shape
+mkdir -p "$(dirname "$SETTINGS")"
+if [ ! -f "$SETTINGS" ]; then
+  echo '{"hooks":{"Stop":[]}}' > "$SETTINGS"
+fi
+
+# Backup
+BAK="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
+cp "$SETTINGS" "$BAK"
+echo "Backed up existing settings to: $BAK"
+
+# Idempotency: check if a marker for this skill already exists; remove it first
+MARKER="skill-telemetry:$SKILL"
+TMP="$(mktemp)"
+jq --arg marker "$MARKER" '
+  .hooks //= {}
+  | .hooks.Stop //= []
+  | .hooks.Stop |= map(select(
+      (.hooks // []) | all(.["x-marker"] != $marker)
+    ))
+' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
+
+# Inject the new entry
+TMP="$(mktemp)"
+jq --argjson entry "$HOOK_ENTRY" '
+  .hooks //= {}
+  | .hooks.Stop //= []
+  | .hooks.Stop += [$entry]
+' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
+
+# Verify JSON is still valid
+if ! jq empty "$SETTINGS" 2>/dev/null; then
+  echo "FATAL: settings.json became invalid; restoring backup"
+  mv "$BAK" "$SETTINGS"
+  exit 1
+fi
+
+echo ""
+echo "✅ Hook installed for skill: $SKILL"
+echo ""
+echo "What happens now:"
+echo "  - Every Claude Code session that uses the '$SKILL' skill"
+echo "    will fire this hook when the session ends."
+echo "  - The hook records skill name + outcome + duration to your"
+echo "    Supabase via telemetry-log."
+echo "  - Sessions that don't use '$SKILL' record nothing."
+echo ""
+echo "To remove: telemetry-hook-uninstall --skill $SKILL"
+echo "To pause:  export SKILL_TELEMETRY=off"

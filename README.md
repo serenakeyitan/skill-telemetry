@@ -398,7 +398,8 @@ model) executes it. Claude *can* skip it: especially for proactive
 skills (auto-invoked, not run as step-by-step workflows), Claude
 sometimes does the work and skips the telemetry block as "boilerplate".
 
-This kit fights that with two layers:
+This kit fights that with three layers, in increasing order of
+reliability and footprint:
 
 1. **Framing** — the SKILL.md telemetry blocks are written as
    mandatory, numbered Steps with an explicit "treat this as
@@ -408,14 +409,44 @@ This kit fights that with two layers:
    marker is left behind, and the *next* run reaps it — recording the
    skipped run as `outcome=unknown`. So a skipped run becomes a
    degraded event, not a vanished one.
+3. **Opt-in Stop hook** — for skills where layers 1+2 still leak too
+   much (typically proactive auto-invoked skills), an opt-in Stop hook
+   captures every session end deterministically at the Claude Code
+   runtime layer. The hook is **not** installed by default.
 
-What this is NOT: a Claude Code Stop hook. A Stop hook (runtime-enforced)
-would be 100% skip-proof, but it requires editing the user's global
-`~/.claude/settings.json` — we deliberately avoid that to stay
-self-contained (`git clone` and it works, nothing touched outside the
-skill). If you query your data and see a high share of
-`outcome=unknown`, that's the signal the framing isn't enough for your
-skill and a hook is worth the footprint.
+### Opt-in Stop hook (for proactive skills)
+
+If empirical data shows your skill skips telemetry frequently (many
+`outcome=unknown` reaped events, or fewer events than you know
+happened), opt into the Stop hook:
+
+```bash
+bin/telemetry-hook-install --skill <your-skill-name>          # install
+bin/telemetry-hook-install --skill <your-skill-name> --dry-run # preview
+bin/telemetry-hook-uninstall --skill <your-skill-name>         # remove
+```
+
+The hook is built with five responsibility practices, because it's
+runtime-enforced and reads from the session transcript:
+
+1. **Opt-in only.** Never auto-installed; requires explicit user action.
+2. **Skill-name filtered.** The hook for skill `tdoc` only fires when
+   tdoc was actually invoked in that session. Sessions that ran only
+   `office-hours` produce zero `tdoc` events.
+3. **Minimal collection.** The hook scans the transcript for `Skill`
+   tool-call names and the last 5 lines for outcome heuristics. It
+   does NOT read your prompts, Claude's replies, file contents, or
+   any other transcript content. Read `bin/telemetry-hook` to verify.
+4. **Clean uninstall.** `telemetry-hook-uninstall` removes the entry
+   from `~/.claude/settings.json` by its marker, preserving every
+   other hook untouched.
+5. **Master kill-switch.** `export SKILL_TELEMETRY=off` suspends both
+   SKILL.md telemetry AND the hook with one env var.
+
+The trade-off: the hook edits `~/.claude/settings.json` (your global
+Claude Code config). The install script backs it up before each change
+and validates the resulting JSON. If install ever leaves the file
+invalid, the backup is restored automatically.
 
 ## Acknowledgements
 

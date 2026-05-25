@@ -58,10 +58,22 @@ STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${SKILL}}"
 ANALYTICS_DIR="$STATE_DIR/telemetry"
 RATE_FILE="$ANALYTICS_DIR/.last-sync"
 
-# Locate config: env override > skill-local config > template default
+# Locate config: env override > installed-skill config > sibling-of-bin > nothing
 BIN_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
-CONFIG="${SKILL_TELEMETRY_CONFIG:-$BIN_DIR/../supabase/config.sh}"
-[ -f "$CONFIG" ] && . "$CONFIG"
+CONFIG="${SKILL_TELEMETRY_CONFIG:-}"
+if [ -z "$CONFIG" ]; then
+  # Try installed skill's telemetry/supabase/config.sh (the gstack-style
+  # location: ~/.claude/skills/<skill>/telemetry/supabase/config.sh)
+  for cand in \
+    "$HOME/.claude/skills/$SKILL/telemetry/supabase/config.sh" \
+    "$BIN_DIR/../supabase/config.sh"; do
+    if [ -f "$cand" ]; then
+      CONFIG="$cand"
+      break
+    fi
+  done
+fi
+[ -n "$CONFIG" ] && [ -f "$CONFIG" ] && . "$CONFIG"
 
 SUPABASE_URL="${SKILL_TELEMETRY_SUPABASE_URL:-}"
 ANON_KEY="${SKILL_TELEMETRY_ANON_KEY:-}"

@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# telemetry-hook-uninstall — remove the opt-in skill-telemetry Stop hook.
+#
+# Inverse of telemetry-hook-install. Finds the hook entry by its
+# x-marker field ("skill-telemetry:<name>") and removes only that entry.
+# All other Stop hooks (drop-the-beat, etc.) are preserved.
+#
+# Usage:
+#   telemetry-hook-uninstall --skill tdoc
+#   telemetry-hook-uninstall --skill tdoc --dry-run
+
+set -euo pipefail
+
+SKILL=""
+DRY_RUN=0
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skill) SKILL="$2"; shift 2 ;;
+    --dry-run) DRY_RUN=1; shift ;;
+    -h|--help)
+      head -12 "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) echo "unknown flag: $1" >&2; exit 2 ;;
+  esac
+done
+
+[ -z "$SKILL" ] && { echo "ERROR: --skill <name> required" >&2; exit 2; }
+
+SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
+MARKER="skill-telemetry:$SKILL"
+
+if [ ! -f "$SETTINGS" ]; then
+  echo "No settings file at $SETTINGS — nothing to remove."
+  exit 0
+fi
+
+MATCHES=$(jq --arg marker "$MARKER" '
+  [(.hooks.Stop // [])[]
+    | select((.hooks // []) | any(.["x-marker"] == $marker))]
+  | length
+' "$SETTINGS")
+
+if [ "$MATCHES" = "0" ]; then
+  echo "No hook found for skill: $SKILL (marker '$MARKER')"
+  exit 0
+fi
+
+echo "Found $MATCHES hook entry/entries for skill '$SKILL'"
+
+if [ "$DRY_RUN" = "1" ]; then
+  echo "(dry-run — nothing removed)"
+  exit 0
+fi
+
+BAK="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
+cp "$SETTINGS" "$BAK"
+echo "Backed up existing settings to: $BAK"
+
+TMP="$(mktemp)"
+jq --arg marker "$MARKER" '
+  .hooks //= {}
+  | .hooks.Stop //= []
+  | .hooks.Stop |= map(select(
+      (.hooks // []) | all(.["x-marker"] != $marker)
+    ))
+' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
+
+if ! jq empty "$SETTINGS" 2>/dev/null; then
+  echo "FATAL: settings.json became invalid; restoring backup"
+  mv "$BAK" "$SETTINGS"
+  exit 1
+fi
+
+echo "✅ Hook removed for skill: $SKILL"
