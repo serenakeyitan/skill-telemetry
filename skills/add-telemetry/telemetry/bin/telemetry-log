@@ -125,8 +125,18 @@ if [ -n "$SESSION_ID" ]; then
   SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
   # If sanitization removed everything, fall back to a deterministic
   # hash so the per-session marker still has a unique name.
+  # F18+F21 fix: same hasher chain as INSTALL_ID below.
   if [ -z "$SESSION_ID_SAFE" ]; then
-    SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | shasum 2>/dev/null | cut -c1-16 || echo unknown)"
+    if command -v sha256sum >/dev/null 2>&1; then
+      SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | sha256sum | cut -c1-16)"
+    elif command -v sha1sum >/dev/null 2>&1; then
+      SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | sha1sum | cut -c1-16)"
+    elif command -v shasum >/dev/null 2>&1; then
+      SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | shasum -a 256 2>/dev/null | cut -c1-16)"
+    else
+      SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | od -An -tx1 2>/dev/null | tr -d ' \n' | cut -c1-16)"
+    fi
+    [ -z "$SESSION_ID_SAFE" ] && SESSION_ID_SAFE="unknown"
   fi
 fi
 
@@ -160,7 +170,23 @@ if [ ! -f "$ID_FILE" ]; then
   elif command -v python3 >/dev/null 2>&1; then
     INSTALL_ID="$(python3 -c 'import uuid;print(uuid.uuid4())')"
   else
-    INSTALL_ID="$(printf '%s-%s' "$(hostname 2>/dev/null || echo host)" "$(date +%s%N 2>/dev/null || date +%s)" | shasum 2>/dev/null | cut -c1-36 || echo "unknown")"
+    # F18+F21 fix: previous fallback had two problems —
+    #   (a) `cut` always exits 0 on empty input, so `|| echo unknown`
+    #       never fired and the var ended up empty;
+    #   (b) shasum is a Perl script absent on minimal Alpine/musl images.
+    # Try coreutils hashers first, fall back to shasum, then to a
+    # deterministic non-crypto last resort via od.
+    _HASH_INPUT="$(hostname 2>/dev/null || echo host)-$(date +%s%N 2>/dev/null || date +%s)"
+    if command -v sha256sum >/dev/null 2>&1; then
+      INSTALL_ID="$(printf '%s' "$_HASH_INPUT" | sha256sum | cut -c1-36)"
+    elif command -v sha1sum >/dev/null 2>&1; then
+      INSTALL_ID="$(printf '%s' "$_HASH_INPUT" | sha1sum | cut -c1-36)"
+    elif command -v shasum >/dev/null 2>&1; then
+      INSTALL_ID="$(printf '%s' "$_HASH_INPUT" | shasum -a 256 2>/dev/null | cut -c1-36)"
+    else
+      INSTALL_ID="$(printf '%s' "$_HASH_INPUT" | od -An -tx1 2>/dev/null | tr -d ' \n' | cut -c1-36)"
+    fi
+    [ -z "$INSTALL_ID" ] && INSTALL_ID="unknown"
   fi
   echo "$INSTALL_ID" > "$ID_FILE" 2>/dev/null || true
 fi

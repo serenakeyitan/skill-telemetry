@@ -166,14 +166,25 @@ for JSONL_FILE in $JSONL_FILES; do
     # CRITICAL: parse in UTC. macOS `date -j -f` doesn't honor the "Z"
     # suffix on its own — TZ=UTC forces correct interpretation. GNU
     # date -d handles "Z" natively but TZ=UTC is harmless there.
-    EVENT_TS=$(echo "$CLEAN_LINE" | sed -n 's/.*"ts":"\([^"]*\)".*/\1/p')
+    # F24 fix: prefer jq when available so an error_message containing
+    # a `"ts":"..."` substring (or the literal `"source":"live"`) doesn't
+    # poison the regex.
+    if command -v jq >/dev/null 2>&1; then
+      EVENT_TS=$(echo "$CLEAN_LINE" | jq -r '.ts // empty' 2>/dev/null)
+    else
+      EVENT_TS=$(echo "$CLEAN_LINE" | sed -n 's/.*"ts":"\([^"]*\)".*/\1/p')
+    fi
     if [ -n "$EVENT_TS" ]; then
       EVENT_EPOCH=$(TZ=UTC date -d "$EVENT_TS" +%s 2>/dev/null || \
                     TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "$EVENT_TS" +%s 2>/dev/null || \
                     echo "$NOW_EPOCH")
       AGE=$(( NOW_EPOCH - EVENT_EPOCH ))
       if [ "$AGE" -gt 300 ]; then
-        CLEAN_LINE=$(echo "$CLEAN_LINE" | sed 's/"source":"live"/"source":"replay"/')
+        if command -v jq >/dev/null 2>&1; then
+          CLEAN_LINE=$(echo "$CLEAN_LINE" | jq -c '.source = "replay"' 2>/dev/null || echo "$CLEAN_LINE")
+        else
+          CLEAN_LINE=$(echo "$CLEAN_LINE" | sed 's/"source":"live"/"source":"replay"/')
+        fi
       fi
     fi
 

@@ -107,18 +107,9 @@ function isOwner(env, session) {
 // ─── Supabase REST query helper ──────────────────────────────
 // Uses service_role to bypass RLS. ONLY called from worker, never
 // exposed to client. The client only sees the resulting JSON.
-async function sb(env, sql) {
-  const url = `${env.SUPABASE_URL}/rest/v1/rpc/exec_sql`;
-  // Supabase REST doesn't expose arbitrary SQL by default. Use the
-  // Postgres protocol via pg-meta endpoint if available, otherwise
-  // use the documented Management API style query.
-  // Actually, use direct PostgREST querying via specific endpoints:
-  // /rest/v1/<view>?select=*&...
-  // This is safer (no SQL injection risk) and uses RLS.
-  // For our needs, we just hit pre-defined views.
-  throw new Error('Use sbView directly');
-}
-
+// All queries go through PostgREST view endpoints (sbView below) —
+// safer than arbitrary SQL because the only thing the client can
+// influence is the WHERE/order/limit params, not the columns/joins.
 async function sbView(env, viewName, params = {}) {
   const qs = new URLSearchParams();
   qs.set('select', params.select || '*');
@@ -636,7 +627,7 @@ export default {
           const filter = {};
           if (skill) filter.skill = `eq.${skill}`;
           if (windowDays) {
-            const since = new Date(Date.now() - parseInt(windowDays) * 86400000).toISOString().slice(0, 10);
+            const since = new Date(Date.now() - parseInt(windowDays, 10) * 86400000).toISOString().slice(0, 10);
             filter.day = `gte.${since}`;
           }
           const rows = await sbView(env, 'skill_dau', {
@@ -654,7 +645,7 @@ export default {
           const filter = { event_type: 'eq.skill_run' };
           if (skill) filter.skill = `eq.${skill}`;
           if (windowDays) {
-            const since = new Date(Date.now() - parseInt(windowDays) * 86400000).toISOString();
+            const since = new Date(Date.now() - parseInt(windowDays, 10) * 86400000).toISOString();
             filter.ts = `gte.${since}`;
           }
           const events = await sbView(env, 'skill_events', {
@@ -683,7 +674,7 @@ export default {
           const filter = {};
           if (skill) filter.skill = `eq.${skill}`;
           if (windowDays) {
-            const since = new Date(Date.now() - parseInt(windowDays) * 86400000).toISOString();
+            const since = new Date(Date.now() - parseInt(windowDays, 10) * 86400000).toISOString();
             filter.ts = `gte.${since}`;
           }
           const events = await sbView(env, 'skill_events', {

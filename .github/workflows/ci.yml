@@ -1,0 +1,101 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  syntax:
+    name: bash syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: bash -n on every script in bin/
+        run: |
+          set -e
+          fail=0
+          for f in bin/*; do
+            [ -f "$f" ] || continue
+            if ! head -1 "$f" | grep -q '^#!.*bash'; then
+              continue
+            fi
+            echo "→ $f"
+            if ! bash -n "$f"; then
+              echo "  FAIL: $f"
+              fail=1
+            fi
+          done
+          # Also check the embedded meta-skill copies
+          for f in skills/add-telemetry/telemetry/bin/*; do
+            [ -f "$f" ] || continue
+            if ! head -1 "$f" | grep -q '^#!.*bash'; then
+              continue
+            fi
+            echo "→ $f"
+            if ! bash -n "$f"; then
+              echo "  FAIL: $f"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  shellcheck:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install shellcheck
+        run: sudo apt-get install -y shellcheck
+      - name: shellcheck bin/
+        # SC1090/SC1091: dynamic source paths (we resolve them at runtime).
+        # SC2155: declare-and-assign (already widespread in this codebase).
+        # SC2086: word-splitting on $VARS — we use this intentionally for
+        # parameter lists. Loosen to warning so CI doesn't block.
+        run: |
+          set -e
+          fail=0
+          for f in bin/*; do
+            [ -f "$f" ] || continue
+            head -1 "$f" | grep -q '^#!.*bash' || continue
+            echo "→ $f"
+            shellcheck -S error -e SC1090,SC1091 "$f" || fail=1
+          done
+          exit $fail
+
+  smoke:
+    name: end-to-end smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: install jq
+        run: sudo apt-get install -y jq
+      - name: run smoke tests
+        run: |
+          chmod +x bin/* tests/*.sh
+          ./tests/smoke.sh
+
+  worker-syntax:
+    name: dashboard worker syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: parse worker.js
+        # Worker code uses CF-specific globals (fetch, KV bindings). Just
+        # check it parses — a real deploy would use `wrangler deploy --dry-run`.
+        run: node --check dashboard/worker.js
+
+  deno-check:
+    name: edge function typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v1
+        with:
+          deno-version: v1.x
+      - name: deno check
+        run: deno check supabase/functions/skill-telemetry-ingest/index.ts

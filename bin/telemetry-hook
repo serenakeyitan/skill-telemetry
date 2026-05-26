@@ -40,7 +40,9 @@ set -uo pipefail
 TARGET_SKILL="${SKILL_TELEMETRY_HOOK_SKILL:-}"
 TEL_BIN="${SKILL_TELEMETRY_HOOK_BIN:-}"
 [ -z "$TARGET_SKILL" ] && exit 0
-[ -x "$TEL_BIN" ] && : || exit 0
+# F4-style precedence-safe check (don't trust `A && : || exit` — same
+# trap that bit us in F11). If the bin isn't executable, exit silently.
+if [ ! -x "$TEL_BIN" ]; then exit 0; fi
 
 # Read the Stop hook payload from stdin
 PAYLOAD="$(cat 2>/dev/null || echo '{}')"
@@ -140,10 +142,19 @@ if [ -z "$DUR" ]; then
     | cut -d'"' -f4 \
     | tail -1)
 
+  # Helper: parse an ISO-8601 timestamp into epoch. Tries GNU date -d
+  # first (handles fractional + Z natively), then BSD date with explicit
+  # format on a stripped-down value. Mirrors telemetry-sync for parity.
+  ts_to_epoch() {
+    local _ts="$1"
+    TZ=UTC date -d "$_ts" "+%s" 2>/dev/null \
+      || TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%SZ" "${_ts%%.*}Z" "+%s" 2>/dev/null \
+      || TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${_ts%%.*}" "+%s" 2>/dev/null \
+      || echo ""
+  }
+
   if [ -n "$SKILL_TS" ]; then
-    SKILL_EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${SKILL_TS%%.*}" "+%s" 2>/dev/null \
-                  || TZ=UTC date -d "$SKILL_TS" "+%s" 2>/dev/null \
-                  || echo "")
+    SKILL_EPOCH=$(ts_to_epoch "$SKILL_TS")
     # Only count it if it's within the last 24h (current session,
     # not an old reused transcript)
     if [ -n "$SKILL_EPOCH" ] && [ "$SKILL_EPOCH" -ge "$CUTOFF_EPOCH" ]; then
@@ -152,9 +163,7 @@ if [ -z "$DUR" ]; then
         | cut -d'"' -f4 \
         | tail -1)
       if [ -n "$LAST_TS" ]; then
-        LAST_EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${LAST_TS%%.*}" "+%s" 2>/dev/null \
-                     || TZ=UTC date -d "$LAST_TS" "+%s" 2>/dev/null \
-                     || echo "")
+        LAST_EPOCH=$(ts_to_epoch "$LAST_TS")
         if [ -n "$LAST_EPOCH" ]; then
           DUR=$(( LAST_EPOCH - SKILL_EPOCH ))
           [ "$DUR" -lt 0 ] && DUR=""

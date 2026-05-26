@@ -1,5 +1,13 @@
 # skill-telemetry — Google Analytics for your Claude Code skill
 
+[![CI](https://github.com/serenakeyitan/skill-telemetry/actions/workflows/ci.yml/badge.svg)](https://github.com/serenakeyitan/skill-telemetry/actions/workflows/ci.yml)
+[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+> **v1.0.0 is production-ready.** Two forensic audits (one in-house, one
+> Codex second opinion) plus a polish-pass cleanup. CI on every push.
+> See [CHANGELOG.md](./CHANGELOG.md).
+
 **You shipped a Claude Code skill. You have no idea if anyone uses it,
 where it breaks, or whether your last change made it worse. This fixes
 that.**
