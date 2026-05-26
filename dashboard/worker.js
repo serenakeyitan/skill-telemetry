@@ -768,8 +768,9 @@ if (!IS_DEMO) setInterval(loadAll, 60000);  // refresh every 60s (skip in demo)
 // ─── Demo data generator ─────────────────────────────────────
 // Used by `?demo=1` to populate the dashboard with a believable rising
 // curve for the screenshot we use in launch comms. Generates 30 days of
-// first-tree sessions on a 50 → ~9k exponential ramp with realistic
-// daily noise, weekend dips, and a few error/abandoned outcomes.
+// first-tree sessions on a hockey-stick that's visible from day 1
+// (start ~400, end ~10k) with realistic mid-window growth spurts,
+// weekend dips, and a few error/abandoned outcomes.
 function demoData(kind) {
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const days = [];
@@ -778,15 +779,23 @@ function demoData(kind) {
     days.push(d.toISOString().slice(0, 10));
   }
 
-  // Exponential ramp 50 -> ~9000 over 30 days with sin-wave weekend dip
+  // Visual goal: chart shouldn't look flat-then-spike. Start at ~400
+  // and end ~10k — a 25× lift over 30 days — so the line is clearly
+  // climbing from the very first data point. Add a mid-window spike
+  // around day 18 (e.g. "got picked up by a newsletter") plus daily
+  // noise so the line has texture, not a smooth boring curve.
   const dauSeries = days.map((day, i) => {
-    const base = 50 * Math.pow(9000 / 50, i / 29);
+    // Base ramp: 400 -> 10000 (25× lift), exponential
+    const base = 400 * Math.pow(25, i / 29);
     // Day-of-week dip (weekends lower)
     const dow = new Date(day + 'T00:00:00Z').getUTCDay();
-    const dipFactor = (dow === 0 || dow === 6) ? 0.72 : 1.0;
-    // Deterministic pseudo-noise so the screenshot is reproducible
-    const noise = 0.85 + 0.30 * Math.abs(Math.sin(i * 1.7 + 2.3));
-    const sessions = Math.round(base * dipFactor * noise);
+    const dipFactor = (dow === 0 || dow === 6) ? 0.78 : 1.0;
+    // Mid-window growth spurt (think: HN front page on day 18)
+    const spike = 1 + 0.45 * Math.exp(-Math.pow((i - 18) / 2.5, 2));
+    // Deterministic pseudo-noise — bigger amplitude so peaks/dips
+    // are visible early in the chart too
+    const noise = 0.78 + 0.42 * Math.abs(Math.sin(i * 1.7 + 2.3));
+    const sessions = Math.round(base * dipFactor * spike * noise);
     const events = Math.round(sessions * (1.6 + 0.2 * Math.sin(i)));
     const dau = Math.round(sessions * (0.55 + 0.08 * Math.cos(i)));
     return { day, skill: 'first-tree', dau, sessions, events };
