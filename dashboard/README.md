@@ -3,34 +3,48 @@
 Owner-only private dashboard for skill creators to view their own
 telemetry data. **Two ways to run it — same UI, same charts.**
 
-## Two modes
+## Three ways to run it
 
-### Local (recommended — zero setup, 30 seconds)
+**TL;DR:** Local for yourself (zero deploy), Cloudflare for sharing.
+
+### 1. Demo mode (30 seconds, synthetic data)
 
 ```bash
-# Demo with synthetic data — see what it looks like first
 npm run demo
 # → http://localhost:8787/?demo=1
+```
 
-# Hook up your real Supabase
+The fastest way to see if you want this. Renders a fake `first-tree`
+skill with 30 days of synthetic data. No Supabase needed.
+
+### 2. Local with your real data (~3 minutes)
+
+You'll need:
+- Node 18+
+- Your skill-telemetry Supabase already set up (see [main README](../README.md))
+- Your project's **`service_role`** key from Supabase Dashboard → Settings → API
+
+```bash
 cp ../supabase/config.local.sh.example ../supabase/config.local.sh
 # Edit config.local.sh — paste your project URL + service_role key
 npm start
 # → http://localhost:8787
 ```
 
-Requires only Node 18+. The dashboard binds to `127.0.0.1` only — no
-auth needed because localhost is the owner by definition. Your
-service_role key never leaves your machine.
+Security:
+- Server binds to `127.0.0.1` only (never LAN/public)
+- Host header allowlist defeats DNS rebinding from a malicious site
+- `config.local.sh` is gitignored — the service_role key never leaves
+  your machine
 
-If you ever want to share the dashboard with collaborators, deploy the
-same code to Cloudflare Workers (free tier):
-
-### Hosted (Cloudflare Workers, ~10 minutes)
+### 3. Hosted on Cloudflare Workers (~10 minutes, for sharing)
 
 Runs on Cloudflare Workers' free tier, authenticates via GitHub Device
 Flow, queries Supabase via service_role (server-side only — the key
 never leaves the worker). [See setup steps below.](#hosted-setup-one-time-10-minutes)
+
+If you don't need to share the dashboard, stop here — local mode above
+is enough.
 
 ## Architecture
 

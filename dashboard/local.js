@@ -113,13 +113,32 @@ const env = cfg || {};
 // ─── HTTP server ──────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT, 10) || 8787;
 
+// DNS-rebinding defense. Binding to 127.0.0.1 alone is not enough:
+// an attacker site (`evil.com`) can use DNS rebinding (TTL=0 returns
+// 127.0.0.1 after first request) so the browser thinks evil.com IS
+// localhost — and our service-role-key proxy happily returns data.
+// We pin Host to known-safe local-loopback values; any other value
+// is rejected with 421 (Misdirected Request).
+const ALLOWED_HOSTS = new Set([
+  `localhost:${PORT}`,
+  `127.0.0.1:${PORT}`,
+  `[::1]:${PORT}`,
+]);
+
 const server = createServer(async (req, res) => {
-  const url = new URL(req.url, `http://${req.headers.host}`);
+  // 1) Host-header allowlist (DNS-rebinding defense)
+  const hostHeader = (req.headers.host || '').toLowerCase();
+  if (!ALLOWED_HOSTS.has(hostHeader)) {
+    res.writeHead(421, { 'Content-Type': 'text/plain' });
+    res.end('misdirected request — this dashboard only serves localhost:' + PORT);
+    return;
+  }
+
+  const url = new URL(req.url, `http://${hostHeader}`);
   const p = url.pathname;
   const method = req.method;
 
-  // Local-only: skip auth. 127.0.0.1 == owner. Bind only to localhost
-  // below so this isn't accidentally exposed.
+  // 2) Local-only: skip auth. 127.0.0.1 == owner. Bind below to localhost.
   const requestIsDemo = isDemo || url.searchParams.get('demo') === '1';
 
   // Render landing → just redirect into the dashboard, no sign-in.
@@ -248,6 +267,23 @@ async function runApi(path, { skill, windowDays }) {
 
 // Bind to localhost ONLY so we never accidentally expose service-role
 // data on a LAN or public interface.
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`\n✗ port ${PORT} is already in use.`);
+    console.error('  Either close whatever is using it, or set a different port:');
+    console.error(`     PORT=8801 npm start`);
+    console.error(`     PORT=8801 npm run demo`);
+    process.exit(1);
+  }
+  if (err.code === 'EACCES') {
+    console.error(`\n✗ permission denied binding port ${PORT}.`);
+    console.error('  Pick a port > 1024:   PORT=8801 npm start');
+    process.exit(1);
+  }
+  console.error('\n✗ server error:', err.message);
+  process.exit(1);
+});
+
 server.listen(PORT, '127.0.0.1', () => {
   const url = `http://localhost:${PORT}${isDemo ? '/?demo=1' : ''}`;
   console.error('\n📊 skill-telemetry dashboard');

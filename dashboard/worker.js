@@ -160,7 +160,7 @@ function landingHtml(owner) {
     --radius: 10px;
   }
   * { box-sizing: border-box; }
-  body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  body { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
          margin: 0; padding: 0; color: var(--text); background: var(--bg);
          min-height: 100vh; display: flex; align-items: center; justify-content: center;
          font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased;
@@ -178,7 +178,7 @@ function landingHtml(owner) {
   p { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
   p:last-child { margin-bottom: 0; }
   code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;
-         font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+         font-family: ui-monospace, 'SF Mono', Menlo, monospace;
          font-size: 13px; color: var(--text); }
   button { padding: 11px 18px; font-size: 14px; font-weight: 500;
            border: 1px solid var(--border); background: #fafafa; color: #09090b;
@@ -187,7 +187,7 @@ function landingHtml(owner) {
   button:hover { background: #e4e4e7; transform: translateY(-1px); }
   .codebox { background: rgba(255,255,255,0.04); padding: 20px; border: 1px solid var(--border);
              border-radius: 8px; margin: 16px 0;
-             font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 24px;
+             font-family: ui-monospace, monospace; font-size: 24px;
              letter-spacing: 0.15em; text-align: center; color: var(--text);
              font-weight: 500; }
   .small { font-size: 13px; color: var(--text-faint); }
@@ -197,7 +197,7 @@ function landingHtml(owner) {
          border: 1px solid rgba(248,113,113,0.2);
          padding: 12px 14px; border-radius: 8px; margin: 12px 0; font-size: 13px; }
   .footer { margin-top: 24px; text-align: center; font-size: 12px; color: var(--text-faint); }
-  .footer a { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .footer a { font-family: ui-monospace, monospace; font-size: 11px; }
 </style>
 </head><body>
 <div class="container">
@@ -298,9 +298,9 @@ export function dashboardHtml(owner) {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>skill-telemetry · ${owner}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<!-- No external font CDN — keeps the local mode promise ("your data
+     never leaves your machine") honest. System font stack approximates
+     Inter on macOS / Windows / modern Linux. -->
 <style>
   :root {
     --bg: #09090b;
@@ -325,7 +325,7 @@ export function dashboardHtml(owner) {
     --radius-sm: 8px;
   }
   * { box-sizing: border-box; }
-  body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  body { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
          margin: 0; padding: 0; color: var(--text); background: var(--bg);
          font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased;
          -moz-osx-font-smoothing: grayscale; font-size: 14px; line-height: 1.5;
@@ -342,7 +342,7 @@ export function dashboardHtml(owner) {
   .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--success);
                box-shadow: 0 0 8px rgba(34,197,94,0.6); }
   .brand-sep { color: var(--text-mute); margin: 0 3px; }
-  .brand-owner { color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+  .brand-owner { color: var(--text-dim); font-family: ui-monospace, monospace;
                  font-size: 12px; font-weight: 400; }
   .header-right { display: flex; align-items: center; gap: 10px; font-size: 12px;
                   color: var(--text-faint); }
@@ -359,7 +359,7 @@ export function dashboardHtml(owner) {
                 margin-bottom: 14px; }
   .page-title h1 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
   .page-title .meta { font-size: 11px; color: var(--text-faint);
-                      font-family: 'JetBrains Mono', monospace; }
+                      font-family: ui-monospace, monospace; }
 
   /* ── Filters ────────────────────────────────────────────── */
   .filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
@@ -406,7 +406,7 @@ export function dashboardHtml(owner) {
   .chart-svg { width: 100%; height: 220px; display: block; }
   .chart-grid line { stroke: var(--border); stroke-dasharray: 2 4; }
   .chart-label { fill: var(--text-faint); font-size: 10px;
-                 font-family: 'JetBrains Mono', monospace; }
+                 font-family: ui-monospace, monospace; }
   .chart-empty { padding: 40px 20px; text-align: center; color: var(--text-faint);
                  font-size: 12px; }
 
@@ -415,10 +415,10 @@ export function dashboardHtml(owner) {
                   margin-bottom: 10px; padding: 0 2px;
                   font-size: 11px; color: var(--text-dim); }
   .legend-item { display: inline-flex; align-items: center; gap: 5px;
-                 font-family: 'Inter', sans-serif; }
+                 font-family: sans-serif; }
   .legend-swatch { width: 7px; height: 7px; border-radius: 2px;
                    display: inline-block; }
-  .legend-num { color: var(--text); font-family: 'JetBrains Mono', monospace;
+  .legend-num { color: var(--text); font-family: ui-monospace, monospace;
                 font-feature-settings: 'tnum'; font-size: 11px;
                 margin-left: 2px; }
 
@@ -432,16 +432,16 @@ export function dashboardHtml(owner) {
   tbody tr:last-child { border-bottom: none; }
   tbody tr:hover { background: rgba(255,255,255,0.02); }
   td { padding: 7px 10px; color: var(--text); }
-  td.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px;
+  td.mono { font-family: ui-monospace, monospace; font-size: 11px;
             color: var(--text-dim); }
-  td.num { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum';
+  td.num { font-family: ui-monospace, monospace; font-feature-settings: 'tnum';
            color: var(--text-dim); text-align: right; }
   td.dim { color: var(--text-faint); }
 
   /* outcome pills */
   .pill { display: inline-flex; align-items: center; gap: 3px;
           padding: 1px 6px; border-radius: 4px; font-size: 10px;
-          font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+          font-weight: 500; font-family: ui-monospace, monospace; }
   .pill::before { content: ''; width: 4px; height: 4px; border-radius: 50%; }
   .pill.success { background: var(--success-bg); color: var(--success); }
   .pill.success::before { background: var(--success); }
@@ -551,7 +551,19 @@ async function fetchData(endpoint) {
   const r = await fetch(\`/api/\${endpoint}?\${params}\`);
   if (!r.ok) {
     if (r.status === 401) { window.location.href = '/'; return null; }
-    throw new Error(\`\${endpoint}: \${r.status}\`);
+    // Surface the backend's error message — much friendlier than just
+    // "events: 500". The body may be JSON ({error, message}) or text.
+    let detail = '';
+    try {
+      const ct = r.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const body = await r.json();
+        detail = body.message || body.error || '';
+      } else {
+        detail = (await r.text()).slice(0, 200);
+      }
+    } catch (_) { /* fall through */ }
+    throw new Error(\`\${endpoint}: \${r.status}\${detail ? ' — ' + detail : ''}\`);
   }
   return r.json();
 }
@@ -1143,14 +1155,17 @@ export default {
             filter,
             limit: 50,
           });
-          // Format ts for display
+          // Format ts for display in the server's timezone. The local
+          // Node server (dashboard/local.js) and the Cloudflare Worker
+          // BOTH respect process.env.TZ / the runtime's TZ. CF Workers
+          // default to UTC; if you want a different display timezone in
+          // the deployed dashboard, set TZ in your wrangler.toml vars.
           const rows = events.map(e => ({
             ...e,
             t: new Date(e.ts).toLocaleString('en-CA', {
               year: 'numeric', month: '2-digit', day: '2-digit',
               hour: '2-digit', minute: '2-digit', second: '2-digit',
               hour12: false,
-              timeZone: 'America/Los_Angeles',
             }).replace(',', ''),
           }));
           return json(rows);

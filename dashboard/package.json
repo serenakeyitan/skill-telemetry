@@ -1,9 +1,19 @@
 {
   "name": "skill-telemetry-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Local + deployable dashboard for skill-telemetry. Same UI both ways.",
   "type": "module",
   "private": true,
+  "license": "MIT",
+  "homepage": "https://github.com/serenakeyitan/skill-telemetry#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/serenakeyitan/skill-telemetry.git",
+    "directory": "dashboard"
+  },
+  "bugs": {
+    "url": "https://github.com/serenakeyitan/skill-telemetry/issues"
+  },
   "scripts": {
     "start": "node local.js",
     "demo": "SKILL_TELEMETRY_DEMO=1 node local.js",

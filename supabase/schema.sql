@@ -33,7 +33,7 @@ alter table skill_events
                                                         -- skill_run | upgrade_prompted | consent_prompted | ...
   add column if not exists sessions       smallint,     -- concurrent active sessions at event time
   add column if not exists source         text default 'live';
-                                                        -- live | replay (telemetry-sync replays)
+                                                        -- live (SKILL.md call) | hook (Stop hook) | replay (sync caught up)
 
 -- For existing pools where error_detail was used as a combined field,
 -- migrate it into error_message so dashboards keep working.

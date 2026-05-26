@@ -122,6 +122,42 @@ else
   fail "telemetry-hook-install rejects unsafe skill names (F22)"
 fi
 
+# ── 10. --source flag persists 'hook' in JSONL ──
+telemetry-log --skill smoke --outcome success --source hook --session-id sess-hk --duration 1 2>/dev/null
+if grep -q '"source":"hook"' "$SKILL_TELEMETRY_DIR/telemetry/"*.jsonl 2>/dev/null; then
+  ok "--source hook persists in JSONL"
+else
+  fail "--source hook persists in JSONL"
+fi
+
+# ── 11. Local dashboard demo mode boots + DNS rebinding defense ──
+# Only run if node + jq are around (CI has both; some local envs may not).
+if command -v node >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
+  cd "$ROOT/dashboard"
+  PORT=19199 SKILL_TELEMETRY_DEMO=1 node local.js >/dev/null 2>&1 &
+  DSH_PID=$!
+  # Poll until ready (up to 6s)
+  for i in $(seq 1 30); do
+    if curl -fs -o /dev/null http://127.0.0.1:19199/api/dau 2>/dev/null; then break; fi
+    sleep 0.2
+  done
+  if curl -fs http://127.0.0.1:19199/api/dau 2>/dev/null | jq -e 'length > 0' >/dev/null 2>&1; then
+    ok "local dashboard demo serves data"
+  else
+    fail "local dashboard demo serves data"
+  fi
+  # DNS rebinding: malicious Host header should be rejected
+  status=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: evil.com" http://127.0.0.1:19199/ 2>/dev/null || echo 000)
+  if [ "$status" = "421" ]; then
+    ok "DNS rebinding defense (Host allowlist) returns 421"
+  else
+    fail "DNS rebinding defense (Host allowlist) — expected 421, got $status"
+  fi
+  kill $DSH_PID 2>/dev/null || true
+  wait $DSH_PID 2>/dev/null || true
+  cd "$ROOT"
+fi
+
 # ── Report ──
 echo ""
 echo "===================================="

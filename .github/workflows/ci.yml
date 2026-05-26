@@ -84,10 +84,52 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - name: parse worker.js
+      - name: parse worker.js + local.js
         # Worker code uses CF-specific globals (fetch, KV bindings). Just
         # check it parses — a real deploy would use `wrangler deploy --dry-run`.
-        run: node --check dashboard/worker.js
+        run: |
+          node --check dashboard/worker.js
+          node --check dashboard/local.js
+
+  local-dashboard:
+    name: local dashboard demo boots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: install jq
+        run: sudo apt-get install -y jq
+      - name: boot demo mode + smoke the API
+        # This is the path a tweet-driven user hits: cd dashboard && npm run demo.
+        # If a refactor breaks `node local.js` startup, we want CI to know.
+        run: |
+          set -e
+          cd dashboard
+          # Use a non-default port so we don't collide with anything.
+          PORT=18801 SKILL_TELEMETRY_DEMO=1 node local.js &
+          SERVER_PID=$!
+          # Give the server time to bind. Timeout-loop is more robust than sleep.
+          for i in $(seq 1 30); do
+            if curl -fs -o /dev/null http://127.0.0.1:18801/api/dau; then
+              echo "✓ server up after ${i}× polls"
+              break
+            fi
+            sleep 0.2
+          done
+          # Assert the API returns demo data
+          rows=$(curl -fs http://127.0.0.1:18801/api/dau | jq 'length')
+          echo "demo /api/dau returned $rows rows"
+          test "$rows" -gt 0
+          # Assert the HTML loads
+          curl -fs -o /dev/null http://127.0.0.1:18801/
+          echo "✓ HTML loads"
+          # Assert DNS-rebinding defense: malicious Host header → 421
+          status=$(curl -s -o /dev/null -w "%{http_code}" -H "Host: evil.com" http://127.0.0.1:18801/)
+          test "$status" = "421" || (echo "DNS rebinding defense regressed; got HTTP $status" && exit 1)
+          echo "✓ DNS rebinding defense holds (HTTP 421)"
+          kill $SERVER_PID 2>/dev/null || true
 
   deno-check:
     name: edge function typecheck

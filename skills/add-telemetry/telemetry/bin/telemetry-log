@@ -65,6 +65,7 @@ STEP=""
 SESSION_ID=""
 SKILL_VERSION=""       # v2: e.g. "0.1.55"
 EVENT_TYPE="skill_run" # v3: skill_run | upgrade_prompted | consent_prompted | ...
+SOURCE="live"          # live (SKILL.md call) | hook (Stop-hook capture) | replay (set by sync)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -78,6 +79,7 @@ while [ $# -gt 0 ]; do
     --session-id)    SESSION_ID="${2:-}"; shift 2 || break ;;
     --skill-version) SKILL_VERSION="${2:-}"; shift 2 || break ;;    # v2
     --event-type)    EVENT_TYPE="${2:-skill_run}"; shift 2 || break ;;  # v3
+    --source)        SOURCE="${2:-live}"; shift 2 || break ;;            # v3
     # F10 fix: warn about unknown flags so typos like `--erro-class`
     # don't silently swallow their values. Telemetry-log must still
     # never exit non-zero (set -uo pipefail not -e), so we just log
@@ -110,6 +112,16 @@ fi
 case "$OUTCOME" in
   success|error|abandoned|unknown) ;;
   *) OUTCOME="unknown" ;;
+esac
+
+# Validate source — telemetry-sync will overwrite "live" with "replay"
+# on >5min-old events, so authors can distinguish in dashboards:
+#   live   = SKILL.md called us within minutes
+#   hook   = Stop hook fired at session end (telemetry-hook)
+#   replay = sync caught up after offline window
+case "$SOURCE" in
+  live|hook|replay) ;;
+  *) SOURCE="live" ;;
 esac
 
 # CODEX-C2 fix: derive a filesystem-safe session id. The raw value
@@ -289,12 +301,13 @@ INSTALL_JSON="null"
 # ─── Append one JSON line (atomic single-line >> on POSIX) ───
 # Schema v3: adds event_type, sessions, source. Plus local-only
 # _repo_slug + _branch (telemetry-sync strips these before upload).
-# source="live" — telemetry-sync flips this to "replay" if it pushes
-# events more than 5 minutes old.
-printf '{"v":3,"ts":"%s","event_type":"%s","skill":"%s","skill_version":%s,"outcome":"%s","duration_s":%s,"error_class":%s,"error_message":%s,"step":%s,"session_id":%s,"installation_id":%s,"os":"%s","arch":"%s","sessions":%s,"source":"live","_repo_slug":%s,"_branch":%s}\n' \
+# source defaults to "live" (SKILL.md call). Stop-hook callers pass
+# --source hook. telemetry-sync flips "live" → "replay" for any event
+# more than 5 minutes old on push.
+printf '{"v":3,"ts":"%s","event_type":"%s","skill":"%s","skill_version":%s,"outcome":"%s","duration_s":%s,"error_class":%s,"error_message":%s,"step":%s,"session_id":%s,"installation_id":%s,"os":"%s","arch":"%s","sessions":%s,"source":"%s","_repo_slug":%s,"_branch":%s}\n' \
   "$TS" "$EVENT_TYPE_ESC" "$SKILL_ESC" "$SKILL_VER_JSON" "$OUTCOME" "$DUR_JSON" \
   "$ERROR_CLASS_JSON" "$ERROR_MSG_JSON" "$STEP_JSON" "$SESSION_JSON" "$INSTALL_JSON" \
-  "$OS_ESC" "$ARCH_ESC" "$CONCURRENT_SESSIONS" \
+  "$OS_ESC" "$ARCH_ESC" "$CONCURRENT_SESSIONS" "$SOURCE" \
   "$REPO_SLUG_JSON" "$REPO_BRANCH_JSON" \
   >> "$JSONL_FILE" 2>/dev/null || true
 

@@ -186,6 +186,7 @@ fi
   --outcome "$OUTCOME" \
   --session-id "${SESSION_ID:-hook-$(date +%s)}" \
   --step "hook-captured" \
+  --source hook \
   ${DURATION_ARG} \
   ${ERROR_CLASS:+--error-class "$ERROR_CLASS"} \
   2>/dev/null || true

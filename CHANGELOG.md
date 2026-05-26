@@ -2,6 +2,66 @@
 
 All notable changes to skill-telemetry.
 
+## v1.1.0 — local dashboard + visual polish
+
+Headline: **the dashboard now runs locally with one command.** No
+Cloudflare account needed, no deploy step, no DNS. Same UI either way.
+
+### Added
+
+- **`dashboard/local.js`** — plain Node ESM HTTP server. `npm start`
+  binds `127.0.0.1:8787` and serves the same dashboard against your
+  own Supabase. Skips GitHub Device Flow because localhost = owner.
+- **`dashboard/?demo=1`** — synthetic-data mode for screenshots and
+  evaluating the project before you commit. Renders a fake `first-tree`
+  skill with 30 days of realistic multi-line activity.
+- **Multi-line chart** — daily activity now plots one line per
+  sub-skill with a legend, gradient fills, and crossover. Looks like
+  a real product, not a single boring curve.
+- **DNS rebinding defense** — `local.js` validates the `Host` header
+  against an allowlist (`localhost:PORT`, `127.0.0.1:PORT`, `[::1]:PORT`)
+  and returns HTTP 421 for anything else. A malicious site cannot
+  rebind to your localhost server even if it tricks the browser into
+  connecting.
+- **`--source` flag on `telemetry-log`** — `live` / `hook` / `replay`.
+  The Stop hook now emits `source=hook` so dashboards can distinguish
+  hook-captured events from SKILL.md self-reports.
+- **`README.md`** — new "See it instantly (no setup)" section near the
+  top, and "Where the telemetry call lives — SKILL.md vs Stop hook"
+  dogfooded scorecard before Install.
+- **`CONTRIBUTING.md`** — how to run the test suite, where to file
+  issues, what we care about in PRs.
+- **`supabase/config.local.sh.example`** — template users copy. Already
+  gitignored along with the new `dashboard/node_modules/`.
+
+### Changed
+
+- **Dashboard visual polish** — dark mode (zinc-900), Inter for headers,
+  JetBrains Mono for nums, hairline borders, hover lift, outcome pills
+  with leading status dots, real SVG sparkline (not a table).
+- **Stat cards shrunk** for density — 32px → 22px numbers, 20×22 → 12×14
+  padding. Whole dashboard fits one viewport.
+- **`bin/skill-events` validators hoisted** above config lookup so an
+  injection payload is rejected before any file is read.
+- **`bin/telemetry-log`**: improved portable hasher chain
+  (`sha256sum → sha1sum → shasum -a 256 → od`); now works on minimal
+  Alpine/musl images.
+- **`bin/telemetry-sync`**: prefers `jq` over `sed` when parsing JSON
+  (more robust against `error_message` containing `"ts":"..."`).
+- **README.md**: source column doc + apologetic config.sh paragraph
+  rewritten in security-positive voice.
+
+### Fixed
+
+- `parseInt(windowDays, 10)` — explicit radix on all 3 sites in
+  `worker.js`.
+- `skill-telemetry-update` clamps exit code to 0/1 (no mod-256 wrap).
+- Removed dead `sb()` function in `dashboard/worker.js`.
+- Consistent timestamp parsing between `telemetry-hook` and
+  `telemetry-sync` (shared `ts_to_epoch` helper).
+- `--outcome completed` default in the hook was being rewritten to
+  `unknown` by `telemetry-log`'s validator → now defaults to `success`.
+
 ## v1.0.0 — production-ready
 
 First stable release. Pipeline is feature-complete and survived two

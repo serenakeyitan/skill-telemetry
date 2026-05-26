@@ -1,12 +1,12 @@
 # skill-telemetry — Google Analytics for your Claude Code skill
 
 [![CI](https://github.com/serenakeyitan/skill-telemetry/actions/workflows/ci.yml/badge.svg)](https://github.com/serenakeyitan/skill-telemetry/actions/workflows/ci.yml)
-[![Version](https://img.shields.io/badge/version-1.0.0-brightgreen)](./CHANGELOG.md)
+[![Version](https://img.shields.io/github/v/tag/serenakeyitan/skill-telemetry?label=version&color=brightgreen)](./CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
-> **v1.0.0 is production-ready.** Two forensic audits (one in-house, one
-> Codex second opinion) plus a polish-pass cleanup. CI on every push.
-> See [CHANGELOG.md](./CHANGELOG.md).
+> **v1.1.0 — production-ready.** Two forensic audits + Codex second
+> opinion + polish-pass cleanup + zero-deploy local dashboard. CI on
+> every push. See [CHANGELOG.md](./CHANGELOG.md).
 
 **You shipped a Claude Code skill. You have no idea if anyone uses it,
 where it breaks, or whether your last change made it worse. This fixes
@@ -36,15 +36,18 @@ this retires gracefully. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design
 
 ## See it instantly (no setup)
 
-The dashboard runs locally with one command — no Cloudflare account,
-no deploy, no DNS. Just open your browser:
+Runs locally — no Cloudflare account, no deploy, no DNS.
+**Requires Node 18+** (uses the built-in `fetch` global). Press
+`Ctrl+C` to stop the server.
 
 ```bash
-# Look at the demo with fake data:
+# 30-second demo with synthetic data
 cd dashboard && npm run demo
 # → http://localhost:8787/?demo=1
+```
 
-# Or point at your own Supabase:
+```bash
+# Point at your own Supabase (after you've set up the pipeline below)
 cd dashboard
 cp ../supabase/config.local.sh.example ../supabase/config.local.sh
 # edit config.local.sh, paste your service_role key
@@ -52,7 +55,9 @@ npm start
 # → http://localhost:8787
 ```
 
-Same dashboard. Same charts. Your data never leaves your machine.
+Same dashboard. Same charts. Your data never leaves your machine —
+the local server binds to `127.0.0.1` only and validates the `Host`
+header to defeat DNS rebinding.
 
 If you want to share the dashboard with collaborators, deploy the same
 code to Cloudflare Workers (free tier) — see
@@ -109,7 +114,7 @@ Every skill run produces ONE row:
 | `installation_id` | `fd0c3fb0-4087-...`                  | Random UUID per user machine         |
 | `os` / `arch`     | `darwin` / `arm64`                   | OS + CPU architecture                |
 | `sessions`        | `1` (or higher when concurrent)      | Concurrent active sessions counter   |
-| `source`          | `live` / `replay`                    | Live submit vs cursor-replay         |
+| `source`          | `live` / `hook` / `replay`           | SKILL.md call / Stop-hook capture / sync replay |
 | `error_detail`    | (deprecated, v1 only)                | Legacy field, kept for back-compat   |
 
 `installation_id` is a UUID generated once on the user's machine. It does
@@ -149,7 +154,7 @@ skill, and only emits telemetry if your skill was actually used.
 We ran both for ~3 weeks across `tdoc` and `add-telemetry`. Here's the
 honest scorecard:
 
-| | **SKILL.md call** | **Stop hook** |
+| **Property** | **SKILL.md call** | **Stop hook** |
 |---|---|---|
 | Setup | Nothing extra — already in the template | One command: `telemetry-hook-install --skill <name>` |
 | Privacy surface | Tiny — just the bash block in your SKILL.md | Reads `~/.claude/settings.json` + the transcript file (skill names only, no message text) |
@@ -198,7 +203,12 @@ sparser than your install count would suggest. They compose cleanly
 There are two paths. **Use the meta-skill** if you can — it's one prompt
 to Claude and you answer one question.
 
-### Path A — Meta-skill (recommended, ~2 minutes)
+### Path A — Meta-skill (recommended, ~5–10 minutes)
+
+First-time setup includes Supabase project provisioning (~2 min wait),
+Homebrew/Supabase CLI install if missing, and a one-time GitHub OAuth
+for Supabase. After the first skill, subsequent skills take ~2 minutes
+because the project + CLI are already there.
 
 1. Clone this repo to a known location:
 
@@ -291,16 +301,16 @@ cp supabase/config.sh.example supabase/config.sh
 Edit `supabase/config.sh` and paste the **Project URL** and **anon public**
 key from Step 1.
 
-Commit this file **in your skill's repo** — your users need it to send
-events to your Supabase. The anon key is meant to be public; it can't
-read data (RLS denies everything), and the actual inserts happen through
-the edge function using a service-role key that lives in Supabase secrets.
+**Commit this file in your skill's repo.** The anon key is a public
+project identifier — Supabase RLS blocks all reads through it, and
+writes only succeed via the edge function (which authenticates with a
+service-role key that lives in Supabase secrets, never in your repo).
+Your users need `config.sh` to know where to POST events.
 
-> ⚠️ Note: the upstream `skill-telemetry` repo's `.gitignore` excludes
-> `supabase/config.sh` so we don't leak our own author config when
-> developing this project. In **your** skill's repo, you DO want to
-> commit `telemetry/supabase/config.sh` — drop the exclusion (or simply
-> don't add it) so users get your project URL when they clone.
+(The `.gitignore` in *this* upstream repo excludes `config.sh` because
+during development of skill-telemetry itself, we don't want our own
+test project URL committed. Your skill repo should NOT inherit that
+rule — just don't add the pattern to your `.gitignore`.)
 
 ### Step 5 — Deploy the edge function
 
