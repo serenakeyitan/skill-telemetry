@@ -67,6 +67,28 @@ while [ $# -gt 0 ]; do
   esac
 done
 
+# ─── Validate inputs BEFORE doing anything else ─────────────
+# Defense in depth: an attacker-controlled --skill, --limit, or TZ
+# must be rejected before we even look at config files or keychains.
+# Hoisted here in v1.0.0 so the audit trail is clear: validation is
+# the first user-facing line of defense.
+if ! echo "$TZ_NAME" | grep -qE '^[A-Za-z0-9_/+-]+$'; then
+  echo "FATAL: TZ '$TZ_NAME' contains unsafe characters." >&2
+  exit 2
+fi
+if [ -n "$SKILL_FILTER" ] && ! echo "$SKILL_FILTER" | grep -qE '^[A-Za-z0-9_-]+$'; then
+  echo "FATAL: --skill '$SKILL_FILTER' contains unsafe characters (allowed: A-Za-z0-9_-)" >&2
+  exit 2
+fi
+case "$LIMIT" in
+  ''|*[!0-9]*)
+    echo "FATAL: --limit '$LIMIT' must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "$LIMIT" -lt 1 ]; then LIMIT=1; fi
+if [ "$LIMIT" -gt 1000 ]; then LIMIT=1000; fi
+
 # ─── Resolve project ref from URL ───────────────────────────
 # Look at env first, then any installed skill's telemetry config
 # (the URL is the same across all skills that share one Supabase pool).
@@ -110,35 +132,9 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 [ -z "$ACCESS_TOKEN" ] && { echo "FATAL: no SUPABASE_ACCESS_TOKEN. Run 'supabase login' or export the env var."; exit 1; }
 
-# ─── Validate inputs before building SQL (F8 from audit) ──────
-# TZ_NAME and SKILL_FILTER end up interpolated into SQL strings.
-# Whitelist their character sets to prevent injection if either ever
-# came from an attacker-controlled source (e.g. a weird /etc/localtime
-# symlink, or a typo'd --skill flag).
-if ! echo "$TZ_NAME" | grep -qE '^[A-Za-z0-9_/+-]+$'; then
-  echo "FATAL: TZ '$TZ_NAME' contains unsafe characters." >&2
-  exit 2
-fi
-if [ -n "$SKILL_FILTER" ] && ! echo "$SKILL_FILTER" | grep -qE '^[A-Za-z0-9_-]+$'; then
-  echo "FATAL: --skill '$SKILL_FILTER' contains unsafe characters (allowed: A-Za-z0-9_-)" >&2
-  exit 2
-fi
-
-# CODEX-C3 fix: LIMIT is interpolated into raw SQL sent to Supabase's
-# database/query endpoint (which uses a management PAT — far more
-# powerful than the dashboard's anon key). Validate it's digits-only
-# and clamp to a sane ceiling so a careless --limit value can't smuggle
-# arbitrary SQL.
-case "$LIMIT" in
-  ''|*[!0-9]*)
-    echo "FATAL: --limit '$LIMIT' must be a positive integer" >&2
-    exit 2
-    ;;
-esac
-if [ "$LIMIT" -lt 1 ]; then LIMIT=1; fi
-if [ "$LIMIT" -gt 1000 ]; then LIMIT=1000; fi
-
 # ─── Build SQL based on mode ──────────────────────────────────
+# Validation of TZ_NAME / SKILL_FILTER / LIMIT was hoisted to the top
+# of the script (just after arg parse) for defense-in-depth.
 WHERE_PARTS=()
 [ -n "$SKILL_FILTER" ] && WHERE_PARTS+=("skill = '$SKILL_FILTER'")
 
