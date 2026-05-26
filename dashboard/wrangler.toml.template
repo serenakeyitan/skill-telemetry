@@ -1,0 +1,32 @@
+# skill-telemetry dashboard — Cloudflare Worker config
+#
+# Copy this to wrangler.toml and fill in your values, then:
+#   wrangler kv:namespace create SESSIONS
+#   wrangler secret put SUPABASE_SERVICE_ROLE_KEY
+#   wrangler deploy
+#
+# DO NOT commit wrangler.toml after filling in — it has account-specific IDs.
+# This .template file IS committed.
+
+name = "skill-telemetry-dashboard"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[[kv_namespaces]]
+binding = "SESSIONS"
+id = "REPLACE_WITH_KV_ID_FROM_wrangler_kv:namespace_create"
+
+[vars]
+# Reuse tdoc's OAuth app (no need to register your own GitHub OAuth app)
+GITHUB_CLIENT_ID = "Ov23liZ1UAGOchvKPmlS"
+
+# Your GitHub username — only this account can sign in and see the dashboard
+SKILL_TELEMETRY_OWNER = "REPLACE_WITH_YOUR_GITHUB_USERNAME"
+
+# Your Supabase project URL
+SUPABASE_URL = "https://REPLACE_WITH_PROJECT_REF.supabase.co"
+
+# Secret (set via `wrangler secret put SUPABASE_SERVICE_ROLE_KEY`):
+#   SUPABASE_SERVICE_ROLE_KEY — find at Supabase Dashboard → Settings → API → service_role
+#                               NEVER commit this. NEVER expose to client.
