@@ -72,14 +72,17 @@ else
 fi
 
 # ── 5. skill-events --skill rejects shell-unsafe chars (F8) ──
-if skill-events --skill 'foo; rm -rf /' 2>&1 | grep -q 'unsafe characters'; then
+# Force TZ to a known-safe value so the TZ validator passes and we
+# actually reach the --skill validator. On stock Ubuntu CI runners
+# /etc/localtime may not be a symlink, leaving TZ_NAME unexpected.
+if TZ=UTC skill-events --skill 'foo; rm -rf /' 2>&1 | grep -q "unsafe characters"; then
   ok "skill-events --skill rejects unsafe chars (F8)"
 else
   fail "skill-events --skill rejects unsafe chars (F8)"
 fi
 
 # ── 6. skill-events --limit rejects non-digit input (C3) ──
-if skill-events --limit '10; drop table' 2>&1 | grep -q 'must be a positive integer'; then
+if TZ=UTC skill-events --limit '10; drop table' 2>&1 | grep -q "must be a positive integer"; then
   ok "skill-events --limit rejects SQL injection (C3)"
 else
   fail "skill-events --limit rejects SQL injection (C3)"
