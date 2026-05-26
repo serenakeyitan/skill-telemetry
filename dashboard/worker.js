@@ -110,7 +110,10 @@ function isOwner(env, session) {
 // All queries go through PostgREST view endpoints (sbView below) —
 // safer than arbitrary SQL because the only thing the client can
 // influence is the WHERE/order/limit params, not the columns/joins.
-async function sbView(env, viewName, params = {}) {
+// Exported for reuse by the local Node server (`dashboard/local.js`).
+// Both runtimes have global `fetch` (Workers natively, Node 18+ natively),
+// so the same function works in both places.
+export async function sbView(env, viewName, params = {}) {
   const qs = new URLSearchParams();
   qs.set('select', params.select || '*');
   if (params.order) qs.set('order', params.order);
@@ -289,7 +292,7 @@ function showError(msg) {
 }
 
 // ─── HTML: dashboard (signed in as owner) ────────────────────
-function dashboardHtml(owner) {
+export function dashboardHtml(owner) {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -815,7 +818,7 @@ if (!IS_DEMO) setInterval(loadAll, 60000);  // refresh every 60s (skip in demo)
 // activity across 4 sub-skills of first-tree, each with its own ramp
 // timing and weight — so the multi-line chart looks busy and product-
 // shaped (not a single boring curve).
-function demoData(kind) {
+export function demoData(kind) {
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const days = [];
   for (let i = 29; i >= 0; i--) {

@@ -1,0 +1,11 @@
+# supabase/config.local.sh — secrets for the LOCAL dashboard only
+#
+# Copy this to config.local.sh and fill in. Do NOT commit
+# config.local.sh — it's gitignored.
+#
+# Find your service-role key at:
+#   Supabase Dashboard → Settings → API → service_role  (the secret one)
+# It bypasses RLS, so only your local Node process should ever see it.
+
+export SKILL_TELEMETRY_SUPABASE_URL="https://YOUR_PROJECT_REF.supabase.co"
+export SKILL_TELEMETRY_SERVICE_ROLE_KEY="eyJhbGciOi...YOUR_SERVICE_ROLE_KEY..."

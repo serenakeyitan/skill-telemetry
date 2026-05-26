@@ -1,9 +1,36 @@
 # skill-telemetry dashboard
 
 Owner-only private dashboard for skill creators to view their own
-telemetry data. Runs on Cloudflare Workers (free tier), authenticates
-via GitHub Device Flow, queries Supabase via service_role (server-side
-only — the key never leaves the worker).
+telemetry data. **Two ways to run it — same UI, same charts.**
+
+## Two modes
+
+### Local (recommended — zero setup, 30 seconds)
+
+```bash
+# Demo with synthetic data — see what it looks like first
+npm run demo
+# → http://localhost:8787/?demo=1
+
+# Hook up your real Supabase
+cp ../supabase/config.local.sh.example ../supabase/config.local.sh
+# Edit config.local.sh — paste your project URL + service_role key
+npm start
+# → http://localhost:8787
+```
+
+Requires only Node 18+. The dashboard binds to `127.0.0.1` only — no
+auth needed because localhost is the owner by definition. Your
+service_role key never leaves your machine.
+
+If you ever want to share the dashboard with collaborators, deploy the
+same code to Cloudflare Workers (free tier):
+
+### Hosted (Cloudflare Workers, ~10 minutes)
+
+Runs on Cloudflare Workers' free tier, authenticates via GitHub Device
+Flow, queries Supabase via service_role (server-side only — the key
+never leaves the worker). [See setup steps below.](#hosted-setup-one-time-10-minutes)
 
 ## Architecture
 
@@ -27,7 +54,7 @@ You → workers.dev URL → Worker
 - Each fork deploys its own worker with its own secrets. Two
   authors who fork this code can NEVER see each other's data.
 
-## Setup (one-time, ~10 minutes)
+## Hosted setup (one-time, ~10 minutes)
 
 ### Prereqs
 

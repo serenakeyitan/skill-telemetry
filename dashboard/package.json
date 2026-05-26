@@ -1,0 +1,15 @@
+{
+  "name": "skill-telemetry-dashboard",
+  "version": "1.0.0",
+  "description": "Local + deployable dashboard for skill-telemetry. Same UI both ways.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node local.js",
+    "demo": "SKILL_TELEMETRY_DEMO=1 node local.js",
+    "deploy": "wrangler deploy"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

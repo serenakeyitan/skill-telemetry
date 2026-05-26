@@ -34,6 +34,32 @@ this retires gracefully. See [ARCHITECTURE.md](./ARCHITECTURE.md) for the design
 
 ---
 
+## See it instantly (no setup)
+
+The dashboard runs locally with one command — no Cloudflare account,
+no deploy, no DNS. Just open your browser:
+
+```bash
+# Look at the demo with fake data:
+cd dashboard && npm run demo
+# → http://localhost:8787/?demo=1
+
+# Or point at your own Supabase:
+cd dashboard
+cp ../supabase/config.local.sh.example ../supabase/config.local.sh
+# edit config.local.sh, paste your service_role key
+npm start
+# → http://localhost:8787
+```
+
+Same dashboard. Same charts. Your data never leaves your machine.
+
+If you want to share the dashboard with collaborators, deploy the same
+code to Cloudflare Workers (free tier) — see
+[dashboard/README.md](./dashboard/README.md).
+
+---
+
 ## The painpoint, concretely
 
 You are a Claude Code skill author. You wrote a skill, people installed it,

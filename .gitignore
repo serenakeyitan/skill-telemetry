@@ -19,3 +19,7 @@ supabase/.temp/
 # Cloudflare Worker per-deployment config (filled wrangler.toml has account IDs)
 dashboard/wrangler.toml
 dashboard/.wrangler/
+
+# Local dashboard config (contains service-role key — never commit)
+**/supabase/config.local.sh
+dashboard/node_modules/
