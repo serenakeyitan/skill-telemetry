@@ -142,43 +142,85 @@ function landingHtml(owner) {
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>skill-telemetry dashboard</title>
+<title>skill-telemetry · sign in</title>
 <style>
-  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-         max-width: 480px; margin: 80px auto; padding: 0 24px; color: #222; }
-  h1 { margin-bottom: 8px; }
-  .sub { color: #666; margin-top: 0; }
-  button { padding: 10px 18px; font-size: 15px; border: 1px solid #222; background: #111; color: #fff;
-           border-radius: 6px; cursor: pointer; margin-top: 16px; }
-  button:hover { background: #333; }
-  .codebox { background: #f4f4f4; padding: 16px; border-radius: 6px; margin: 16px 0;
-             font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 18px;
-             letter-spacing: 0.1em; text-align: center; }
-  .small { font-size: 13px; color: #666; }
-  a { color: #2952cc; }
-  .err { color: #b00020; background: #fff0f0; padding: 12px; border-radius: 4px; margin: 12px 0; }
+  :root {
+    --bg: #09090b;
+    --bg-card: #111114;
+    --border: #1f1f23;
+    --text: #fafafa;
+    --text-dim: #a1a1aa;
+    --text-faint: #71717a;
+    --accent: #fafafa;
+    --danger: #f87171;
+    --danger-bg: rgba(248,113,113,0.08);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+         margin: 0; padding: 0; color: var(--text); background: var(--bg);
+         min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased;
+         background-image: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(120,119,198,0.12), transparent);
+  }
+  .container { max-width: 440px; width: 100%; padding: 32px 24px; }
+  .logo { display: flex; align-items: center; gap: 8px; margin-bottom: 24px;
+          font-size: 14px; font-weight: 500; color: var(--text-dim); }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e;
+              box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+  h1 { margin: 0 0 8px; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; }
+  .sub { color: var(--text-dim); margin: 0 0 32px; font-size: 15px; line-height: 1.5; }
+  .card { background: var(--bg-card); border: 1px solid var(--border);
+          border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
+  p { color: var(--text-dim); font-size: 14px; line-height: 1.6; margin: 0 0 16px; }
+  p:last-child { margin-bottom: 0; }
+  code { background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;
+         font-family: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+         font-size: 13px; color: var(--text); }
+  button { padding: 11px 18px; font-size: 14px; font-weight: 500;
+           border: 1px solid var(--border); background: #fafafa; color: #09090b;
+           border-radius: 8px; cursor: pointer; transition: all 0.15s ease;
+           font-family: inherit; }
+  button:hover { background: #e4e4e7; transform: translateY(-1px); }
+  .codebox { background: rgba(255,255,255,0.04); padding: 20px; border: 1px solid var(--border);
+             border-radius: 8px; margin: 16px 0;
+             font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 24px;
+             letter-spacing: 0.15em; text-align: center; color: var(--text);
+             font-weight: 500; }
+  .small { font-size: 13px; color: var(--text-faint); }
+  a { color: var(--text); text-decoration: none; border-bottom: 1px solid var(--border); }
+  a:hover { border-bottom-color: var(--text-dim); }
+  .err { color: var(--danger); background: var(--danger-bg);
+         border: 1px solid rgba(248,113,113,0.2);
+         padding: 12px 14px; border-radius: 8px; margin: 12px 0; font-size: 13px; }
+  .footer { margin-top: 24px; text-align: center; font-size: 12px; color: var(--text-faint); }
+  .footer a { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
 </style>
 </head><body>
-<h1>skill-telemetry dashboard</h1>
-<p class="sub">Private. Only the configured owner can sign in.</p>
+<div class="container">
+  <div class="logo"><span class="logo-dot"></span> skill-telemetry</div>
+  <h1>Welcome back</h1>
+  <p class="sub">Sign in to view your skill's analytics. Only the configured owner of this Cloudflare Worker can access this dashboard.</p>
 
-<div id="step-start">
-  <p>This dashboard is for the owner of this skill's telemetry data — usually
-  the skill creator. ${owner ? `Configured owner: <code>${owner}</code>` : `<span class="err">No owner configured. Set <code>SKILL_TELEMETRY_OWNER</code> in wrangler.toml.</span>`}</p>
-  <button onclick="startAuth()">Sign in with GitHub</button>
+  <div class="card">
+    <div id="step-start">
+      <p>${owner ? `Configured owner: <code>${owner}</code>` : `<span class="err" style="display:block;">No owner configured. Set <code>SKILL_TELEMETRY_OWNER</code> in wrangler.toml.</span>`}</p>
+      <button onclick="startAuth()">Continue with GitHub →</button>
+    </div>
+
+    <div id="step-code" style="display:none;">
+      <p>Open <a id="ghurl" href="" target="_blank">github.com/login/device</a> and enter this code:</p>
+      <div class="codebox" id="usercode">—</div>
+      <p class="small">Waiting for GitHub approval<span id="status"></span></p>
+    </div>
+
+    <div id="error" class="err" style="display:none;"></div>
+  </div>
+
+  <div class="footer">
+    Open source · <a href="https://github.com/serenakeyitan/skill-telemetry">github.com/serenakeyitan/skill-telemetry</a>
+  </div>
 </div>
-
-<div id="step-code" style="display:none;">
-  <p>Go to <a id="ghurl" href="" target="_blank">github.com/login/device</a> and enter this code:</p>
-  <div class="codebox" id="usercode">—</div>
-  <p class="small">Waiting for GitHub approval… <span id="status"></span></p>
-</div>
-
-<div id="error" class="err" style="display:none;"></div>
-
-<p class="small" style="margin-top: 40px;">
-Open source · <a href="https://github.com/serenakeyitan/skill-telemetry">github.com/serenakeyitan/skill-telemetry</a>
-</p>
 
 <script>
 let deviceCode = null;
@@ -252,88 +294,223 @@ function dashboardHtml(owner) {
 <html lang="en"><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>skill-telemetry — ${owner}'s dashboard</title>
+<title>skill-telemetry · ${owner}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-         margin: 0; padding: 0; color: #222; background: #fafafa; }
-  header { background: #111; color: #fff; padding: 14px 24px; display: flex;
-           align-items: center; justify-content: space-between; }
-  header h1 { margin: 0; font-size: 16px; font-weight: 500; }
-  header .right { font-size: 13px; opacity: 0.8; }
-  header a { color: #fff; }
-  main { max-width: 1200px; margin: 24px auto; padding: 0 24px; }
-  .filters { background: #fff; padding: 16px; border-radius: 6px; margin-bottom: 16px;
-             border: 1px solid #e5e5e7; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
-  .filters label { font-size: 13px; color: #666; }
-  .filters select, .filters input { padding: 6px 10px; border: 1px solid #d0d0d2; border-radius: 4px;
-                                    font: inherit; font-size: 13px; background: #fff; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 12px; margin-bottom: 24px; }
-  .stat { background: #fff; padding: 16px; border-radius: 6px; border: 1px solid #e5e5e7; }
-  .stat .label { font-size: 12px; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
-  .stat .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
-  .stat .sub { font-size: 12px; color: #888; margin-top: 4px; }
-  section { background: #fff; padding: 16px 20px; border-radius: 6px; margin-bottom: 16px;
-            border: 1px solid #e5e5e7; }
-  section h2 { margin-top: 0; font-size: 15px; font-weight: 600; color: #444; }
+  :root {
+    --bg: #09090b;
+    --bg-card: #111114;
+    --bg-card-hover: #161619;
+    --bg-subtle: #18181b;
+    --border: #1f1f23;
+    --border-strong: #27272a;
+    --text: #fafafa;
+    --text-dim: #a1a1aa;
+    --text-faint: #71717a;
+    --text-mute: #52525b;
+    --success: #22c55e;
+    --success-bg: rgba(34,197,94,0.1);
+    --danger: #f87171;
+    --danger-bg: rgba(248,113,113,0.1);
+    --warning: #fbbf24;
+    --warning-bg: rgba(251,191,36,0.1);
+    --accent: #818cf8;
+    --accent-2: #c084fc;
+    --radius: 12px;
+    --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; }
+  body { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+         margin: 0; padding: 0; color: var(--text); background: var(--bg);
+         font-feature-settings: 'cv11', 'ss01'; -webkit-font-smoothing: antialiased;
+         -moz-osx-font-smoothing: grayscale; font-size: 14px; line-height: 1.5;
+         background-image:
+           radial-gradient(ellipse 80% 50% at 50% -20%, rgba(120,119,198,0.08), transparent),
+           radial-gradient(ellipse 50% 30% at 100% 0%, rgba(192,132,252,0.05), transparent); }
+
+  /* ── Header ────────────────────────────────────────────── */
+  header { padding: 16px 32px; display: flex; align-items: center; justify-content: space-between;
+           border-bottom: 1px solid var(--border); background: rgba(9,9,11,0.7);
+           backdrop-filter: blur(8px); position: sticky; top: 0; z-index: 10; }
+  .brand { display: flex; align-items: center; gap: 10px; font-size: 14px;
+           font-weight: 500; letter-spacing: -0.01em; }
+  .brand-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--success);
+               box-shadow: 0 0 10px rgba(34,197,94,0.6); }
+  .brand-sep { color: var(--text-mute); margin: 0 4px; }
+  .brand-owner { color: var(--text-dim); font-family: 'JetBrains Mono', monospace;
+                 font-size: 13px; font-weight: 400; }
+  .header-right { display: flex; align-items: center; gap: 12px; font-size: 13px;
+                  color: var(--text-faint); }
+  button.logout { background: transparent; color: var(--text-dim); border: 1px solid var(--border-strong);
+                  padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 13px;
+                  font-family: inherit; transition: all 0.15s ease; }
+  button.logout:hover { background: var(--bg-card-hover); color: var(--text); border-color: var(--text-mute); }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  main { max-width: 1280px; margin: 0 auto; padding: 32px; }
+
+  /* ── Page title ────────────────────────────────────────── */
+  .page-title { display: flex; justify-content: space-between; align-items: baseline;
+                margin-bottom: 24px; }
+  .page-title h1 { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
+  .page-title .meta { font-size: 12px; color: var(--text-faint);
+                      font-family: 'JetBrains Mono', monospace; }
+
+  /* ── Filters ────────────────────────────────────────────── */
+  .filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+             margin-bottom: 28px; }
+  .filter-pill { position: relative; display: inline-flex; align-items: center; }
+  .filter-pill label { position: absolute; left: 14px; top: 50%; transform: translateY(-50%);
+                       font-size: 12px; color: var(--text-faint); pointer-events: none;
+                       z-index: 1; }
+  .filter-pill select { padding: 8px 32px 8px 80px; background: var(--bg-card);
+                        border: 1px solid var(--border); border-radius: 8px;
+                        color: var(--text); font: inherit; font-size: 13px;
+                        appearance: none; cursor: pointer; transition: all 0.15s ease;
+                        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a1a1aa' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+                        background-repeat: no-repeat; background-position: right 12px center; }
+  .filter-pill select:hover { border-color: var(--border-strong); background-color: var(--bg-card-hover); }
+  .filter-pill select:focus { outline: none; border-color: var(--text-mute);
+                              box-shadow: 0 0 0 3px rgba(255,255,255,0.04); }
+
+  /* ── Stat grid ─────────────────────────────────────────── */
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+               gap: 1px; background: var(--border); border: 1px solid var(--border);
+               border-radius: var(--radius); overflow: hidden; margin-bottom: 32px; }
+  .stat { background: var(--bg-card); padding: 20px 22px;
+          transition: background 0.15s ease; }
+  .stat:hover { background: var(--bg-card-hover); }
+  .stat .label { font-size: 11px; color: var(--text-faint); text-transform: uppercase;
+                 letter-spacing: 0.08em; font-weight: 500; }
+  .stat .value { font-size: 32px; font-weight: 600; margin-top: 6px;
+                 letter-spacing: -0.03em; font-feature-settings: 'tnum'; }
+  .stat .sub { font-size: 12px; color: var(--text-faint); margin-top: 4px; }
+  .stat .sub.up { color: var(--success); }
+  .stat .sub.down { color: var(--danger); }
+
+  /* ── Sections ──────────────────────────────────────────── */
+  section { background: var(--bg-card); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 24px; margin-bottom: 16px; }
+  .section-head { display: flex; justify-content: space-between; align-items: baseline;
+                  margin-bottom: 20px; }
+  .section-head h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .section-head .desc { font-size: 12px; color: var(--text-faint); }
+
+  /* ── DAU chart (SVG) ───────────────────────────────────── */
+  #dau-chart { width: 100%; }
+  .chart-svg { width: 100%; height: 200px; display: block; }
+  .chart-grid line { stroke: var(--border); stroke-dasharray: 2 4; }
+  .chart-area { fill: url(#chart-gradient); }
+  .chart-line { fill: none; stroke: #818cf8; stroke-width: 1.75; stroke-linejoin: round;
+                stroke-linecap: round; }
+  .chart-dot { fill: #818cf8; }
+  .chart-label { fill: var(--text-faint); font-size: 10px;
+                 font-family: 'JetBrains Mono', monospace; }
+  .chart-tooltip { pointer-events: none; }
+  .chart-empty { padding: 60px 24px; text-align: center; color: var(--text-faint);
+                 font-size: 13px; }
+
+  /* ── Tables ────────────────────────────────────────────── */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th { text-align: left; padding: 8px; background: #fafafa; border-bottom: 1px solid #e5e5e7;
-       color: #555; font-weight: 500; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; }
-  td { padding: 8px; border-bottom: 1px solid #f0f0f0; }
-  td.outcome-success { color: #16803c; }
-  td.outcome-error { color: #b00020; }
-  td.outcome-abandoned { color: #a05a00; }
-  td.outcome-unknown { color: #777; }
-  td.mono { font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; color: #666; }
-  .loading { padding: 40px; text-align: center; color: #888; }
-  .empty { padding: 24px; text-align: center; color: #888; font-style: italic; }
-  button.logout { background: transparent; color: #fff; border: 1px solid #555; padding: 4px 10px;
-                  border-radius: 4px; cursor: pointer; font-size: 12px; }
-  button.logout:hover { background: #333; }
+  thead tr { border-bottom: 1px solid var(--border); }
+  th { text-align: left; padding: 10px 12px; color: var(--text-faint);
+       font-weight: 500; font-size: 11px; text-transform: uppercase;
+       letter-spacing: 0.06em; }
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s ease; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+  td { padding: 11px 12px; color: var(--text); }
+  td.mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;
+            color: var(--text-dim); }
+  td.num { font-family: 'JetBrains Mono', monospace; font-feature-settings: 'tnum';
+           color: var(--text-dim); text-align: right; }
+  td.dim { color: var(--text-faint); }
+
+  /* outcome pills */
+  .pill { display: inline-flex; align-items: center; gap: 4px;
+          padding: 2px 8px; border-radius: 4px; font-size: 11px;
+          font-weight: 500; font-family: 'JetBrains Mono', monospace; }
+  .pill::before { content: ''; width: 5px; height: 5px; border-radius: 50%; }
+  .pill.success { background: var(--success-bg); color: var(--success); }
+  .pill.success::before { background: var(--success); }
+  .pill.error { background: var(--danger-bg); color: var(--danger); }
+  .pill.error::before { background: var(--danger); }
+  .pill.abandoned { background: var(--warning-bg); color: var(--warning); }
+  .pill.abandoned::before { background: var(--warning); }
+  .pill.unknown { background: rgba(161,161,170,0.1); color: var(--text-faint); }
+  .pill.unknown::before { background: var(--text-faint); }
+
+  .loading { padding: 40px; text-align: center; color: var(--text-faint); font-size: 13px; }
+  .loading::after { content: '…'; animation: dots 1.4s steps(4, end) infinite; }
+  @keyframes dots { 0%, 20% { content: ''; } 40% { content: '.'; } 60% { content: '..'; } 80%, 100% { content: '…'; } }
+  .empty { padding: 40px 24px; text-align: center; color: var(--text-faint);
+           font-size: 13px; font-style: italic; }
 </style>
 </head><body>
 
 <header>
-  <h1>📊 skill-telemetry — <span id="owner-name">${owner}</span></h1>
-  <div class="right">
-    Signed in · <button class="logout" onclick="logout()">Sign out</button>
+  <div class="brand">
+    <span class="brand-dot"></span>
+    skill-telemetry
+    <span class="brand-sep">/</span>
+    <span class="brand-owner">${owner}</span>
+  </div>
+  <div class="header-right">
+    <span id="updated-at"></span>
+    <button class="logout" onclick="logout()">Sign out</button>
   </div>
 </header>
 
 <main>
+  <div class="page-title">
+    <h1>Overview</h1>
+    <span class="meta">v1.0.0</span>
+  </div>
+
   <div class="filters">
-    <label>Skill:
+    <div class="filter-pill">
+      <label>Skill</label>
       <select id="filter-skill" onchange="loadAll()">
         <option value="">All</option>
       </select>
-    </label>
-    <label title="Applies to the Daily activity, Step breakdown, and Recent events sections below. The top stat cards show all-time totals.">Time window (lower sections):
+    </div>
+    <div class="filter-pill">
+      <label>Period</label>
       <select id="filter-window" onchange="loadAll()">
         <option value="1">Last 24h</option>
-        <option value="7" selected>Last 7 days</option>
-        <option value="30">Last 30 days</option>
+        <option value="7" selected>Last 7d</option>
+        <option value="30">Last 30d</option>
         <option value="">All time</option>
       </select>
-    </label>
-    <span style="margin-left: auto; font-size: 12px; color: #888;" id="updated-at"></span>
+    </div>
   </div>
 
-  <h2 style="margin-top: 0;">All-time totals <span style="font-weight: 400; color: #888; font-size: 13px;">(per skill; not affected by the time-window filter)</span></h2>
-  <div class="grid" id="stats"></div>
+  <div class="stat-grid" id="stats"></div>
 
   <section>
-    <h2>Daily activity</h2>
-    <div id="dau-table" class="loading">Loading…</div>
+    <div class="section-head">
+      <h2>Daily activity</h2>
+      <span class="desc">Sessions per day · selected window</span>
+    </div>
+    <div id="dau-chart" class="loading">Loading</div>
   </section>
 
   <section>
-    <h2>Step breakdown</h2>
-    <div id="step-table" class="loading">Loading…</div>
+    <div class="section-head">
+      <h2>Step breakdown</h2>
+      <span class="desc">Success rate per step</span>
+    </div>
+    <div id="step-table" class="loading">Loading</div>
   </section>
 
   <section>
-    <h2>Recent events</h2>
-    <div id="events-table" class="loading">Loading…</div>
+    <div class="section-head">
+      <h2>Recent events</h2>
+      <span class="desc">Latest 50</span>
+    </div>
+    <div id="events-table" class="loading">Loading</div>
   </section>
 </main>
 
@@ -363,6 +540,14 @@ async function fetchData(endpoint) {
   return r.json();
 }
 
+// Format big numbers — 1234 -> "1.2k", 1_500_000 -> "1.5M"
+function fmtNum(n) {
+  if (n == null) return '—';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+
 async function loadStats() {
   const data = await fetchData('summary');
   if (!data) return;
@@ -387,39 +572,105 @@ async function loadStats() {
     errors: acc.errors + (r.errors || 0),
   }), { events: 0, users: 0, sessions: 0, errors: 0 });
 
-  const successRate = data.length > 0 ?
-    (data.reduce((s, r) => s + (r.successes || 0), 0) /
-     Math.max(totals.events, 1) * 100).toFixed(1) : '0';
+  const successCount = data.reduce((s, r) => s + (r.successes || 0), 0);
+  const successRate = totals.events > 0 ? (successCount / totals.events * 100).toFixed(1) : '—';
 
   document.getElementById('stats').innerHTML = \`
-    <div class="stat"><div class="label">Total events</div><div class="value">\${totals.events}</div></div>
-    <div class="stat"><div class="label">Distinct users</div><div class="value">\${totals.users}</div></div>
-    <div class="stat"><div class="label">Sessions</div><div class="value">\${totals.sessions}</div></div>
-    <div class="stat"><div class="label">Success rate</div><div class="value">\${successRate}%</div></div>
+    <div class="stat"><div class="label">Total events</div><div class="value">\${fmtNum(totals.events)}</div><div class="sub">all-time</div></div>
+    <div class="stat"><div class="label">Distinct users</div><div class="value">\${fmtNum(totals.users)}</div><div class="sub">unique installations</div></div>
+    <div class="stat"><div class="label">Sessions</div><div class="value">\${fmtNum(totals.sessions)}</div><div class="sub">across all skills</div></div>
+    <div class="stat"><div class="label">Success rate</div><div class="value">\${successRate}%</div><div class="sub \${successRate >= 95 ? 'up' : successRate >= 85 ? '' : 'down'}">\${successCount} / \${totals.events}</div></div>
   \`;
 }
 
+// Render the DAU sparkline chart as inline SVG so it screenshots crisply.
+// Aggregates rows by day across all skills (sessions count). Pads missing
+// days as zeros so the X axis is contiguous.
 async function loadDau() {
   const data = await fetchData('dau');
   if (!data) return;
-  const el = document.getElementById('dau-table');
-  if (!data || data.length === 0) { el.className = 'empty'; el.textContent = 'No data in this window.'; return; }
+  const el = document.getElementById('dau-chart');
+  if (!data || data.length === 0) {
+    el.className = 'chart-empty';
+    el.textContent = 'No activity in this window yet.';
+    return;
+  }
   el.className = '';
+
+  // Aggregate by day (sum sessions across all skills)
+  const byDay = {};
+  for (const r of data) {
+    const d = r.day;
+    if (!byDay[d]) byDay[d] = 0;
+    byDay[d] += Number(r.sessions || 0);
+  }
+  const days = Object.keys(byDay).sort();
+  if (days.length === 0) { el.className = 'chart-empty'; el.textContent = 'No activity.'; return; }
+
+  // Fill in missing dates between min and max so the chart x-axis is contiguous.
+  const start = new Date(days[0] + 'T00:00:00Z');
+  const end = new Date(days[days.length - 1] + 'T00:00:00Z');
+  const series = [];
+  for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    const key = d.toISOString().slice(0, 10);
+    series.push({ day: key, sessions: byDay[key] || 0 });
+  }
+
+  // Chart dimensions
+  const W = 1000, H = 200, padL = 40, padR = 16, padT = 16, padB = 28;
+  const innerW = W - padL - padR;
+  const innerH = H - padT - padB;
+  const maxY = Math.max(1, ...series.map(s => s.sessions));
+  // Round maxY up to a nice tick (e.g. 1, 2, 5, 10, 20, 50, ...)
+  const niceMax = (() => {
+    const exp = Math.pow(10, Math.floor(Math.log10(maxY)));
+    const frac = maxY / exp;
+    let nice;
+    if (frac <= 1) nice = 1;
+    else if (frac <= 2) nice = 2;
+    else if (frac <= 5) nice = 5;
+    else nice = 10;
+    return nice * exp;
+  })();
+
+  const xStep = series.length > 1 ? innerW / (series.length - 1) : 0;
+  const xFor = i => padL + i * xStep;
+  const yFor = v => padT + innerH - (v / niceMax) * innerH;
+
+  // Build path strings
+  const linePath = series.map((s, i) => \`\${i === 0 ? 'M' : 'L'} \${xFor(i).toFixed(2)} \${yFor(s.sessions).toFixed(2)}\`).join(' ');
+  const areaPath = \`\${linePath} L \${xFor(series.length - 1).toFixed(2)} \${padT + innerH} L \${padL} \${padT + innerH} Z\`;
+
+  // Y-axis ticks (4)
+  const yTicks = [0, niceMax * 0.25, niceMax * 0.5, niceMax * 0.75, niceMax];
+
+  // X-axis labels (first, mid, last)
+  const xLabels = series.length <= 3 ? series.map((s, i) => ({ i, label: s.day.slice(5) }))
+    : [
+        { i: 0, label: series[0].day.slice(5) },
+        { i: Math.floor(series.length / 2), label: series[Math.floor(series.length / 2)].day.slice(5) },
+        { i: series.length - 1, label: series[series.length - 1].day.slice(5) }
+      ];
+
   el.innerHTML = \`
-    <table>
-      <thead><tr><th>Day</th><th>Skill</th><th>DAU</th><th>Sessions</th><th>Events</th></tr></thead>
-      <tbody>
-        \${data.map(r => \`
-          <tr>
-            <td class="mono">\${esc(r.day)}</td>
-            <td>\${esc(r.skill)}</td>
-            <td>\${esc(r.dau)}</td>
-            <td>\${esc(r.sessions)}</td>
-            <td>\${esc(r.events)}</td>
-          </tr>
-        \`).join('')}
-      </tbody>
-    </table>
+    <svg class="chart-svg" viewBox="0 0 \${W} \${H}" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#818cf8" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <g class="chart-grid">
+        \${yTicks.map(t => \`<line x1="\${padL}" x2="\${W - padR}" y1="\${yFor(t)}" y2="\${yFor(t)}"/>\`).join('')}
+      </g>
+      <g class="chart-axis">
+        \${yTicks.map(t => \`<text class="chart-label" x="\${padL - 8}" y="\${yFor(t) + 3}" text-anchor="end">\${t}</text>\`).join('')}
+        \${xLabels.map(x => \`<text class="chart-label" x="\${xFor(x.i)}" y="\${H - 8}" text-anchor="middle">\${esc(x.label)}</text>\`).join('')}
+      </g>
+      <path class="chart-area" d="\${areaPath}"/>
+      <path class="chart-line" d="\${linePath}"/>
+      \${series.map((s, i) => s.sessions > 0 ? \`<circle class="chart-dot" cx="\${xFor(i)}" cy="\${yFor(s.sessions)}" r="2.5"><title>\${esc(s.day)} · \${s.sessions} sessions</title></circle>\` : '').join('')}
+    </svg>
   \`;
 }
 
@@ -427,21 +678,21 @@ async function loadSteps() {
   const data = await fetchData('steps');
   if (!data) return;
   const el = document.getElementById('step-table');
-  if (!data || data.length === 0) { el.className = 'empty'; el.textContent = 'No step data.'; return; }
+  if (!data || data.length === 0) { el.className = 'empty'; el.textContent = 'No step data in this window.'; return; }
   el.className = '';
   el.innerHTML = \`
     <table>
-      <thead><tr><th>Step</th><th>Skill</th><th>Runs</th><th>Success</th><th>Error</th><th>Abandoned</th><th>Success %</th></tr></thead>
+      <thead><tr><th>Step</th><th>Skill</th><th>Runs</th><th>Success</th><th>Error</th><th>Bail</th><th style="text-align:right">Rate</th></tr></thead>
       <tbody>
         \${data.map(r => \`
           <tr>
-            <td>\${esc(r.step || '-')}</td>
-            <td>\${esc(r.skill)}</td>
-            <td>\${esc(r.runs)}</td>
-            <td class="outcome-success">\${esc(r.ok)}</td>
-            <td class="outcome-error">\${esc(r.err)}</td>
-            <td class="outcome-abandoned">\${esc(r.bail)}</td>
-            <td>\${esc(r.success_pct)}%</td>
+            <td class="mono">\${esc(r.step || '—')}</td>
+            <td class="dim">\${esc(r.skill)}</td>
+            <td class="num">\${esc(r.runs)}</td>
+            <td><span class="pill success">\${esc(r.ok)}</span></td>
+            <td>\${r.err > 0 ? \`<span class="pill error">\${esc(r.err)}</span>\` : '<span class="dim">—</span>'}</td>
+            <td>\${r.bail > 0 ? \`<span class="pill abandoned">\${esc(r.bail)}</span>\` : '<span class="dim">—</span>'}</td>
+            <td class="num">\${esc(r.success_pct)}%</td>
           </tr>
         \`).join('')}
       </tbody>
@@ -457,32 +708,37 @@ async function loadEvents() {
   el.className = '';
   el.innerHTML = \`
     <table>
-      <thead><tr><th>Time</th><th>Skill</th><th>Event</th><th>Outcome</th><th>Step</th><th>Duration</th><th>Error</th></tr></thead>
+      <thead><tr><th>Time</th><th>Skill</th><th>Event</th><th>Outcome</th><th>Step</th><th style="text-align:right">Dur</th><th>Error</th></tr></thead>
       <tbody>
-        \${data.map(r => \`
+        \${data.map(r => {
+          const outcome = r.outcome || 'unknown';
+          return \`
           <tr>
             <td class="mono">\${esc(r.t)}</td>
             <td>\${esc(r.skill)}</td>
-            <td>\${esc(r.event_type || 'skill_run')}</td>
-            <td class="outcome-\${esc(r.outcome || 'unknown')}">\${esc(r.outcome || '-')}</td>
-            <td>\${esc(r.step || '-')}</td>
-            <td>\${r.duration_s != null ? esc(r.duration_s + 's') : '-'}</td>
-            <td class="outcome-error">\${esc(r.error_class || '')}</td>
+            <td class="dim">\${esc(r.event_type || 'skill_run')}</td>
+            <td><span class="pill \${esc(outcome)}">\${esc(outcome)}</span></td>
+            <td class="mono">\${esc(r.step || '—')}</td>
+            <td class="num">\${r.duration_s != null ? esc(r.duration_s) + 's' : '—'}</td>
+            <td class="mono"><span class="dim">\${esc(r.error_class || '—')}</span></td>
           </tr>
-        \`).join('')}
+        \`;}).join('')}
       </tbody>
     </table>
   \`;
 }
 
 async function loadAll() {
-  document.getElementById('updated-at').textContent = 'Updating…';
+  const updEl = document.getElementById('updated-at');
+  updEl.textContent = 'syncing…';
   try {
     await Promise.all([loadStats(), loadDau(), loadSteps(), loadEvents()]);
     const now = new Date();
-    document.getElementById('updated-at').textContent = 'Updated ' + now.toLocaleTimeString();
+    const hh = String(now.getHours()).padStart(2, '0');
+    const mm = String(now.getMinutes()).padStart(2, '0');
+    updEl.textContent = \`live · \${hh}:\${mm}\`;
   } catch (e) {
-    document.getElementById('updated-at').textContent = 'Error: ' + e.message;
+    updEl.textContent = 'error · ' + e.message;
   }
 }
 
