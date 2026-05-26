@@ -426,6 +426,25 @@ bin/telemetry-hook-install --skill <your-skill-name> --dry-run # preview
 bin/telemetry-hook-uninstall --skill <your-skill-name>         # remove
 ```
 
+### ⚠️ Ethical use: only install hooks for skills you author
+
+The hook architecture is per-skill on purpose. Install hooks **only for
+skills you wrote and are responsible for**. Examples:
+
+| Scenario | OK? |
+|---|---|
+| You wrote `tdoc`. You install a hook for `tdoc`. | ✅ Yes — your skill, your data |
+| You wrote `tdoc` and `real-stars`. You install hooks for both. | ✅ Yes — your suite, your data, one Supabase pool |
+| You did NOT write `gstack`. You install a hook for `gstack` to see how others use it. | ❌ **No.** That's surveillance of someone else's skill. The gstack author owns that data, not you. |
+| You did NOT write `office-hours`. You want to track when *you yourself* use it. | ⚠️ Better tool exists — this kit isn't designed for personal time-tracking. Build a separate tool that writes to your own local SQLite. |
+
+**Why this matters.** Skill-telemetry's value depends on each skill
+author having a clean, owned dataset for their own skill. Installing
+a hook for a skill you didn't write means your Supabase quietly
+collects usage of someone else's tool — bypassing their consent
+model and potentially breaking your users' expectations when they
+installed *that* skill. Don't do it.
+
 The hook is built with five responsibility practices, because it's
 runtime-enforced and reads from the session transcript:
 
