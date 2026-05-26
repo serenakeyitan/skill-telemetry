@@ -45,8 +45,11 @@ for candidate in \
 done
 
 if [ -z "$SRC" ]; then
+  # Fork-friendly default (Codex audit C6): allow overriding the upstream
+  # repo via env so a fork doesn't silently pull from the original author.
+  CLONE_URL="${SKILL_TELEMETRY_CLONE_URL:-https://github.com/serenakeyitan/skill-telemetry}"
   rm -rf /tmp/skill-telemetry-src
-  git clone --depth 1 -q https://github.com/serenakeyitan/skill-telemetry /tmp/skill-telemetry-src
+  git clone --depth 1 -q "$CLONE_URL" /tmp/skill-telemetry-src
   SRC=/tmp/skill-telemetry-src
 fi
 
@@ -70,7 +73,10 @@ META_SKILL_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 [ -z "$META_SKILL_DIR" ] && META_SKILL_DIR="$HOME/code/skill-telemetry/skills/add-telemetry"
 META_TEL_BIN="$META_SKILL_DIR/telemetry/bin/telemetry-log"
 META_TEL_HOME="$HOME/.add-telemetry"
-META_TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+# Sanitize session id for filesystem use (Codex audit C2 parity).
+META_TEL_SESSION_ID_RAW="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+META_TEL_SESSION_ID="$(printf '%s' "$META_TEL_SESSION_ID_RAW" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+[ -z "$META_TEL_SESSION_ID" ] && META_TEL_SESSION_ID="shell-$$"
 if [ -x "$META_TEL_BIN" ]; then
   mkdir -p "$META_TEL_HOME/sentinels"
   date +%s > "$META_TEL_HOME/sentinels/$META_TEL_SESSION_ID"

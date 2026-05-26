@@ -12,8 +12,12 @@ see [README.md](./README.md).
 
 **Is:**
 - Per-skill, per-author telemetry. One skill = one author = one Supabase pool.
-- An honest pipe: skill explicitly calls `bin/telemetry-log` from inside its
-  own SKILL.md. No global hooks, no transcript grep, no inference.
+- An honest pipe: by default a skill explicitly calls `bin/telemetry-log` from
+  inside its own SKILL.md. No global hooks, no cross-skill transcript grep,
+  no inference. An **opt-in per-skill Stop hook** (`bin/telemetry-hook`) is
+  also available — it's filtered to a single skill name, only reads which
+  Skill tool calls happened (no prompt/reply content), and is installed
+  explicitly via `telemetry-hook-install --skill <name>`. See PRIVACY.md.
 - Local-first: events are written to JSONL on the user's machine FIRST,
   then a background sync pushes to the author's Supabase. If Supabase is
   unreachable, data stays local and replays next time. Cursor file tracks

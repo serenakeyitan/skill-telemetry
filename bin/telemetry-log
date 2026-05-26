@@ -112,6 +112,24 @@ case "$OUTCOME" in
   *) OUTCOME="unknown" ;;
 esac
 
+# CODEX-C2 fix: derive a filesystem-safe session id. The raw value
+# flows into sentinel/sessions/pending paths; a malicious --session-id
+# like "../../outside" would write outside the analytics dir. Use the
+# raw value only for the JSON payload (where it's quoted properly),
+# and a sanitized hash for any filesystem path.
+SESSION_ID_SAFE=""
+if [ -n "$SESSION_ID" ]; then
+  # Strip everything that isn't [A-Za-z0-9_-]. That covers the common
+  # case (Claude Code session IDs are UUIDs) without ever permitting
+  # path separators, dots, or shell metacharacters.
+  SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+  # If sanitization removed everything, fall back to a deterministic
+  # hash so the per-session marker still has a unique name.
+  if [ -z "$SESSION_ID_SAFE" ]; then
+    SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | shasum 2>/dev/null | cut -c1-16 || echo unknown)"
+  fi
+fi
+
 # ─── State dirs ──────────────────────────────────────────────
 STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${SKILL}}"
 ANALYTICS_DIR="$STATE_DIR/telemetry"
@@ -125,8 +143,8 @@ ID_FILE="$ANALYTICS_DIR/installation-id"
 # here too (belt-and-suspenders; harmless if the marker is absent).
 # We do NOT reap other sessions' markers here — that's the preamble's
 # job, and reaping here would risk a recursion (reap → telemetry-log).
-if [ -n "$SESSION_ID" ]; then
-  rm -f "$ANALYTICS_DIR/pending/.pending-$SESSION_ID" 2>/dev/null || true
+if [ -n "$SESSION_ID_SAFE" ]; then
+  rm -f "$ANALYTICS_DIR/pending/.pending-$SESSION_ID_SAFE" 2>/dev/null || true
 fi
 
 mkdir -p "$ANALYTICS_DIR" 2>/dev/null || exit 0
@@ -168,7 +186,7 @@ ARCH="$(uname -m 2>/dev/null | tr '[:upper:]' '[:lower:]' || echo unknown)"
 # That's how many concurrent skill runs are active right now.
 SESSIONS_DIR="$ANALYTICS_DIR/sessions"
 mkdir -p "$SESSIONS_DIR" 2>/dev/null || true
-[ -n "$SESSION_ID" ] && touch "$SESSIONS_DIR/$SESSION_ID" 2>/dev/null || true
+[ -n "$SESSION_ID_SAFE" ] && touch "$SESSIONS_DIR/$SESSION_ID_SAFE" 2>/dev/null || true
 # Reap stale (>120min) markers, count what's left
 find "$SESSIONS_DIR" -type f -mmin +120 -delete 2>/dev/null || true
 CONCURRENT_SESSIONS="$(find "$SESSIONS_DIR" -type f 2>/dev/null | wc -l | tr -d ' ' || echo 1)"

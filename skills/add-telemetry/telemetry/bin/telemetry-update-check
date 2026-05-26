@@ -43,7 +43,26 @@ LOCAL=""
 # fall back to a built-in default that says "unknown"
 [ -z "$LOCAL" ] && LOCAL="unknown"
 
-REMOTE_URL="${SKILL_TELEMETRY_REMOTE_VERSION:-https://raw.githubusercontent.com/serenakeyitan/skill-telemetry/main/VERSION}"
+# CODEX-C6 fix: fork isolation. The previous hardcoded URL meant any
+# fork (and any skill bundling this code) silently checked the upstream
+# author's VERSION instead of the fork's own. Resolution order:
+#   1. $SKILL_TELEMETRY_REMOTE_VERSION env (explicit override)
+#   2. The local git remote, if this dir is a git repo (auto-detects forks)
+#   3. The original upstream as a last resort
+REMOTE_URL="${SKILL_TELEMETRY_REMOTE_VERSION:-}"
+if [ -z "$REMOTE_URL" ]; then
+  # Try to derive from the local repo's origin remote.
+  REPO_ROOT="$(cd "$BIN_DIR/.." 2>/dev/null && pwd)"
+  if [ -n "$REPO_ROOT" ] && [ -d "$REPO_ROOT/.git" ] && command -v git >/dev/null 2>&1; then
+    ORIGIN_URL="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
+    # Parse "git@github.com:owner/repo(.git)?" or "https://github.com/owner/repo(.git)?"
+    SLUG="$(echo "$ORIGIN_URL" | sed -E 's#(git@github\.com:|https?://github\.com/)([^/]+/[^/.]+)(\.git)?.*#\2#')"
+    case "$SLUG" in
+      */*) REMOTE_URL="https://raw.githubusercontent.com/$SLUG/main/VERSION" ;;
+    esac
+  fi
+fi
+REMOTE_URL="${REMOTE_URL:-https://raw.githubusercontent.com/serenakeyitan/skill-telemetry/main/VERSION}"
 
 # ─── Cache hit fast path ─────────────────────────────────────
 # If we already checked recently, emit cached answer (no network).

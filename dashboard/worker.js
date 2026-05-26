@@ -316,7 +316,7 @@ function dashboardHtml(owner) {
         <option value="">All</option>
       </select>
     </label>
-    <label>Time:
+    <label title="Applies to the Daily activity, Step breakdown, and Recent events sections below. The top stat cards show all-time totals.">Time window (lower sections):
       <select id="filter-window" onchange="loadAll()">
         <option value="1">Last 24h</option>
         <option value="7" selected>Last 7 days</option>
@@ -327,6 +327,7 @@ function dashboardHtml(owner) {
     <span style="margin-left: auto; font-size: 12px; color: #888;" id="updated-at"></span>
   </div>
 
+  <h2 style="margin-top: 0;">All-time totals <span style="font-weight: 400; color: #888; font-size: 13px;">(per skill; not affected by the time-window filter)</span></h2>
   <div class="grid" id="stats"></div>
 
   <section>

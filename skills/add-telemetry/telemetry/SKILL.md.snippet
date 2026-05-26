@@ -70,7 +70,11 @@ fi
 # Determine session ID. Claude Code sets $CLAUDE_SESSION_ID in newer
 # versions; fall back to a stable per-shell ID derived from PID + start
 # epoch so the sentinel is unique per concurrent skill run.
-TEL_SESSION_ID="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+# Sanitize for filesystem safety (matches telemetry-log + telemetry-hook
+# — see Codex audit C2): tr removes any character outside [A-Za-z0-9_-].
+TEL_SESSION_ID_RAW="${CLAUDE_SESSION_ID:-shell-$$-$(date +%s)}"
+TEL_SESSION_ID="$(printf '%s' "$TEL_SESSION_ID_RAW" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+[ -z "$TEL_SESSION_ID" ] && TEL_SESSION_ID="shell-$$"
 
 # Write per-session sentinel. Using one global .session-start across
 # concurrent sessions corrupts duration_s when sessions overlap.
@@ -227,7 +231,9 @@ is an incomplete run.
 # end block runs in the same shell. If not (Claude split it across
 # Bash calls), reconstruct the same fallback.
 TEL_HOME="$HOME/.{{SKILL_NAME}}"
-TEL_SESSION_ID="${CLAUDE_SESSION_ID:-${TEL_SESSION_ID:-shell-$$-$(date +%s)}}"
+TEL_SESSION_ID_RAW="${CLAUDE_SESSION_ID:-${TEL_SESSION_ID:-shell-$$-$(date +%s)}}"
+TEL_SESSION_ID="$(printf '%s' "$TEL_SESSION_ID_RAW" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+[ -z "$TEL_SESSION_ID" ] && TEL_SESSION_ID="shell-$$"
 END=$(date +%s)
 START=$(cat "$TEL_HOME/sentinels/$TEL_SESSION_ID" 2>/dev/null || echo "$END")
 DURATION=$(( END - START ))

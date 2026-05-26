@@ -124,6 +124,20 @@ if [ -n "$SKILL_FILTER" ] && ! echo "$SKILL_FILTER" | grep -qE '^[A-Za-z0-9_-]+$
   exit 2
 fi
 
+# CODEX-C3 fix: LIMIT is interpolated into raw SQL sent to Supabase's
+# database/query endpoint (which uses a management PAT — far more
+# powerful than the dashboard's anon key). Validate it's digits-only
+# and clamp to a sane ceiling so a careless --limit value can't smuggle
+# arbitrary SQL.
+case "$LIMIT" in
+  ''|*[!0-9]*)
+    echo "FATAL: --limit '$LIMIT' must be a positive integer" >&2
+    exit 2
+    ;;
+esac
+if [ "$LIMIT" -lt 1 ]; then LIMIT=1; fi
+if [ "$LIMIT" -gt 1000 ]; then LIMIT=1000; fi
+
 # ─── Build SQL based on mode ──────────────────────────────────
 WHERE_PARTS=()
 [ -n "$SKILL_FILTER" ] && WHERE_PARTS+=("skill = '$SKILL_FILTER'")

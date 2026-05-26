@@ -82,7 +82,12 @@ echo "$INVOKED_SKILLS" | grep -qx "$TARGET_SKILL" || exit 0
 # low-cardinality class tag — no message body — so the privacy promise
 # in PRIVACY.md and README is honest.
 LAST_TAIL="$(tail -5 "$TRANSCRIPT" 2>/dev/null || true)"
-OUTCOME="completed"
+# CODEX-C1 fix: telemetry-log validates --outcome against the set
+# {success,error,abandoned,unknown}. The previous default "completed"
+# silently rewrote to "unknown" — so every hook-captured run that
+# *did* succeed was misclassified. Use "success" so the heuristic
+# below stays the source of truth.
+OUTCOME="success"
 ERROR_CLASS=""
 
 if echo "$LAST_TAIL" | grep -qi '"is_error":true\|"type":"error"'; then
@@ -102,8 +107,12 @@ DURATION_ARG=""
 DUR=""
 
 # Strategy 1: sentinel file from preamble
+# CODEX-C2 fix: SESSION_ID comes from a JSON payload on stdin — treat as
+# untrusted. Sanitize for filesystem use (raw value of "../../x" would
+# escape the state dir).
 STATE_DIR="${SKILL_TELEMETRY_DIR:-$HOME/.${TARGET_SKILL}}"
-START_FILE="$STATE_DIR/sentinels/$SESSION_ID"
+SESSION_ID_SAFE="$(printf '%s' "$SESSION_ID" | tr -cd 'A-Za-z0-9_-' | cut -c1-64)"
+START_FILE="$STATE_DIR/sentinels/$SESSION_ID_SAFE"
 if [ -f "$START_FILE" ]; then
   START_EPOCH="$(cat "$START_FILE" 2>/dev/null || echo "")"
   if [ -n "$START_EPOCH" ]; then

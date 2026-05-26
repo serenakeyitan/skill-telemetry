@@ -194,9 +194,16 @@ cp supabase/config.sh.example supabase/config.sh
 Edit `supabase/config.sh` and paste the **Project URL** and **anon public**
 key from Step 1.
 
-Yes, you commit this file. The anon key is meant to be public; it can't
+Commit this file **in your skill's repo** — your users need it to send
+events to your Supabase. The anon key is meant to be public; it can't
 read data (RLS denies everything), and the actual inserts happen through
 the edge function using a service-role key that lives in Supabase secrets.
+
+> ⚠️ Note: the upstream `skill-telemetry` repo's `.gitignore` excludes
+> `supabase/config.sh` so we don't leak our own author config when
+> developing this project. In **your** skill's repo, you DO want to
+> commit `telemetry/supabase/config.sh` — drop the exclusion (or simply
+> don't add it) so users get your project URL when they clone.
 
 ### Step 5 — Deploy the edge function
 
