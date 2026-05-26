@@ -555,12 +555,16 @@ rm -f "$META_TEL_HOME_PATH/sentinels/$META_TEL_SESSION_ID"
 # Fire event. --step records which target skill we instrumented.
 # --error-class will be empty on success.
 if [ -x "$META_TEL_BIN_PATH" ]; then
+  # F7+F15 fix: read VERSION from the root of the skill-telemetry
+  # source repo (single source of truth). The previous code read
+  # $META_SKILL_DIR/VERSION which was removed when we deduplicated.
+  ST_ROOT="$(cd "$META_SKILL_DIR/../.." 2>/dev/null && pwd || echo "$HOME/code/skill-telemetry")"
   "$META_TEL_BIN_PATH" \
     --skill add-telemetry \
     --outcome success \
     --duration "$META_DURATION" \
     --step "installed_to:$SKILL_NAME" \
-    --skill-version "$(cat "$META_SKILL_DIR/VERSION" 2>/dev/null || echo unknown)" \
+    --skill-version "$(cat "$ST_ROOT/VERSION" 2>/dev/null || echo unknown)" \
     --session-id "$META_TEL_SESSION_ID"
 fi
 ```

@@ -78,7 +78,14 @@ while [ $# -gt 0 ]; do
     --session-id)    SESSION_ID="${2:-}"; shift 2 || break ;;
     --skill-version) SKILL_VERSION="${2:-}"; shift 2 || break ;;    # v2
     --event-type)    EVENT_TYPE="${2:-skill_run}"; shift 2 || break ;;  # v3
-    *) shift ;;
+    # F10 fix: warn about unknown flags so typos like `--erro-class`
+    # don't silently swallow their values. Telemetry-log must still
+    # never exit non-zero (set -uo pipefail not -e), so we just log
+    # to stderr and continue.
+    *)
+      echo "telemetry-log: warning: unknown flag '$1' ignored" >&2
+      shift
+      ;;
   esac
 done
 
@@ -278,7 +285,14 @@ is_version_snoozed() {
     [ -z "$line" ] && continue
     local sver=$(echo "$line" | awk '{print $1}')
     local suntil=$(echo "$line" | awk '{print $2}')
-    if [ "$sver" = "$target" ] && [ "$now" -lt "$suntil" ] 2>/dev/null; then
+    # F13 fix: validate suntil is numeric. Without this check, a
+    # corrupted line ("0.5.0 GARBAGE") makes the -lt comparison
+    # silently fail under `2>/dev/null`, treating the version as
+    # NOT snoozed → re-prompts the user even though they snoozed.
+    case "$suntil" in
+      ''|*[!0-9]*)  continue ;;  # malformed line, skip it
+    esac
+    if [ "$sver" = "$target" ] && [ "$now" -lt "$suntil" ]; then
       return 0  # is snoozed
     fi
   done < "$SNOOZE_FILE"

@@ -137,13 +137,21 @@ for JSONL_FILE in $JSONL_FILES; do
     # ── Strip local-only fields before sending (gstack parity) ──
     # Prefer jq for correctness (handles escaped quotes). Fall back to
     # sed if jq unavailable.
-    # IMPORTANT: if jq fails, SKIP the line rather than send it raw
-    # (raw contains _repo_slug/_branch we promised to strip).
+    # IMPORTANT: if jq fails, the line is malformed JSON. F12 fix:
+    # don't silently drop and advance the cursor — that's invisible
+    # data loss. Instead, append to a quarantine file the author can
+    # inspect, and still advance (so we don't wedge forever on the
+    # same bad line).
     if command -v jq >/dev/null 2>&1; then
       CLEAN_LINE=$(echo "$LINE" | jq -c 'del(._repo_slug, ._branch)' 2>/dev/null)
       if [ -z "$CLEAN_LINE" ]; then
-        # jq failed (malformed JSON?) — skip rather than leak
-        COUNT=$(( COUNT + 1 ))  # advance cursor; corrupted line can't be retried
+        QUARANTINE="$ANALYTICS_DIR/.quarantine.jsonl"
+        # Tag with timestamp so author knows when corruption appeared
+        printf '{"_quarantined_at":"%s","_reason":"jq_parse_failed","_raw":%s}\n' \
+          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          "$(printf '%s' "$LINE" | jq -Rs . 2>/dev/null || echo '""')" \
+          >> "$QUARANTINE" 2>/dev/null || true
+        COUNT=$(( COUNT + 1 ))  # advance cursor — line is recorded in quarantine
         continue
       fi
     else
