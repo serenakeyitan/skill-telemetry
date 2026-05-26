@@ -400,17 +400,24 @@ function dashboardHtml(owner) {
 
   /* ── DAU chart (SVG) ───────────────────────────────────── */
   #dau-chart { width: 100%; }
-  .chart-svg { width: 100%; height: 200px; display: block; }
+  .chart-svg { width: 100%; height: 260px; display: block; }
   .chart-grid line { stroke: var(--border); stroke-dasharray: 2 4; }
-  .chart-area { fill: url(#chart-gradient); }
-  .chart-line { fill: none; stroke: #818cf8; stroke-width: 1.75; stroke-linejoin: round;
-                stroke-linecap: round; }
-  .chart-dot { fill: #818cf8; }
   .chart-label { fill: var(--text-faint); font-size: 10px;
                  font-family: 'JetBrains Mono', monospace; }
-  .chart-tooltip { pointer-events: none; }
   .chart-empty { padding: 60px 24px; text-align: center; color: var(--text-faint);
                  font-size: 13px; }
+
+  /* legend (per-line) */
+  .chart-legend { display: flex; flex-wrap: wrap; gap: 16px;
+                  margin-bottom: 14px; padding: 0 4px;
+                  font-size: 12px; color: var(--text-dim); }
+  .legend-item { display: inline-flex; align-items: center; gap: 6px;
+                 font-family: 'Inter', sans-serif; }
+  .legend-swatch { width: 8px; height: 8px; border-radius: 2px;
+                   display: inline-block; }
+  .legend-num { color: var(--text); font-family: 'JetBrains Mono', monospace;
+                font-feature-settings: 'tnum'; font-size: 11px;
+                margin-left: 2px; }
 
   /* ── Tables ────────────────────────────────────────────── */
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -589,9 +596,11 @@ async function loadStats() {
   \`;
 }
 
-// Render the DAU sparkline chart as inline SVG so it screenshots crisply.
-// Aggregates rows by day across all skills (sessions count). Pads missing
-// days as zeros so the X axis is contiguous.
+// Render the DAU chart as inline SVG so it screenshots crisply.
+// One line per sub-skill — colors come either from the row's "color"
+// field (demo mode) or are assigned from a default palette (real data).
+// Daily series are pivoted to skill→[{day, sessions}] and rendered as
+// overlaid line+area paths with a legend above the chart.
 async function loadDau() {
   const data = await fetchData('dau');
   if (!data) return;
@@ -603,31 +612,49 @@ async function loadDau() {
   }
   el.className = '';
 
-  // Aggregate by day (sum sessions across all skills)
-  const byDay = {};
+  const PALETTE = ['#818cf8', '#22d3ee', '#c084fc', '#f472b6', '#34d399', '#fb923c', '#facc15', '#94a3b8'];
+
+  // Pivot: skill -> { day -> sessions }
+  const bySkill = {};
   for (const r of data) {
-    const d = r.day;
-    if (!byDay[d]) byDay[d] = 0;
-    byDay[d] += Number(r.sessions || 0);
+    const sk = r.skill || 'unknown';
+    if (!bySkill[sk]) bySkill[sk] = { color: r.color || null, daily: {} };
+    bySkill[sk].daily[r.day] = (bySkill[sk].daily[r.day] || 0) + Number(r.sessions || 0);
   }
-  const days = Object.keys(byDay).sort();
-  if (days.length === 0) { el.className = 'chart-empty'; el.textContent = 'No activity.'; return; }
 
-  // Fill in missing dates between min and max so the chart x-axis is contiguous.
-  const start = new Date(days[0] + 'T00:00:00Z');
-  const end = new Date(days[days.length - 1] + 'T00:00:00Z');
-  const series = [];
+  // Determine the contiguous date axis (min day → max day across all skills)
+  const allDays = new Set();
+  for (const sk of Object.values(bySkill)) {
+    for (const d of Object.keys(sk.daily)) allDays.add(d);
+  }
+  const sortedDays = [...allDays].sort();
+  if (sortedDays.length === 0) { el.className = 'chart-empty'; el.textContent = 'No activity.'; return; }
+  const start = new Date(sortedDays[0] + 'T00:00:00Z');
+  const end = new Date(sortedDays[sortedDays.length - 1] + 'T00:00:00Z');
+  const axis = [];
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
-    const key = d.toISOString().slice(0, 10);
-    series.push({ day: key, sessions: byDay[key] || 0 });
+    axis.push(d.toISOString().slice(0, 10));
   }
 
-  // Chart dimensions
-  const W = 1000, H = 200, padL = 40, padR = 16, padT = 16, padB = 28;
+  // Build per-skill series aligned to axis, assign colors. Sort by total
+  // sessions desc so the dominant skill renders last (on top).
+  const skillEntries = Object.entries(bySkill)
+    .map(([name, info]) => {
+      const series = axis.map(day => ({ day, sessions: info.daily[day] || 0 }));
+      const total = series.reduce((s, p) => s + p.sessions, 0);
+      return { name, color: info.color, series, total };
+    })
+    .sort((a, b) => a.total - b.total); // smallest first so largest paints on top
+  skillEntries.forEach((sk, i) => {
+    if (!sk.color) sk.color = PALETTE[i % PALETTE.length];
+  });
+
+  // Chart dimensions — bumped height a bit to give legend room
+  const W = 1000, H = 240, padL = 44, padR = 16, padT = 32, padB = 28;
   const innerW = W - padL - padR;
   const innerH = H - padT - padB;
-  const maxY = Math.max(1, ...series.map(s => s.sessions));
-  // Round maxY up to a nice tick (e.g. 1, 2, 5, 10, 20, 50, ...)
+
+  const maxY = Math.max(1, ...skillEntries.flatMap(sk => sk.series.map(p => p.sessions)));
   const niceMax = (() => {
     const exp = Math.pow(10, Math.floor(Math.log10(maxY)));
     const frac = maxY / exp;
@@ -639,43 +666,60 @@ async function loadDau() {
     return nice * exp;
   })();
 
-  const xStep = series.length > 1 ? innerW / (series.length - 1) : 0;
+  const xStep = axis.length > 1 ? innerW / (axis.length - 1) : 0;
   const xFor = i => padL + i * xStep;
   const yFor = v => padT + innerH - (v / niceMax) * innerH;
 
-  // Build path strings
-  const linePath = series.map((s, i) => \`\${i === 0 ? 'M' : 'L'} \${xFor(i).toFixed(2)} \${yFor(s.sessions).toFixed(2)}\`).join(' ');
-  const areaPath = \`\${linePath} L \${xFor(series.length - 1).toFixed(2)} \${padT + innerH} L \${padL} \${padT + innerH} Z\`;
-
-  // Y-axis ticks (4)
   const yTicks = [0, niceMax * 0.25, niceMax * 0.5, niceMax * 0.75, niceMax];
-
-  // X-axis labels (first, mid, last)
-  const xLabels = series.length <= 3 ? series.map((s, i) => ({ i, label: s.day.slice(5) }))
+  const xLabels = axis.length <= 3
+    ? axis.map((d, i) => ({ i, label: d.slice(5) }))
     : [
-        { i: 0, label: series[0].day.slice(5) },
-        { i: Math.floor(series.length / 2), label: series[Math.floor(series.length / 2)].day.slice(5) },
-        { i: series.length - 1, label: series[series.length - 1].day.slice(5) }
+        { i: 0, label: axis[0].slice(5) },
+        { i: Math.floor(axis.length / 2), label: axis[Math.floor(axis.length / 2)].slice(5) },
+        { i: axis.length - 1, label: axis[axis.length - 1].slice(5) }
       ];
 
+  // Build SVG line + area paths per skill. Gradient defs are also per-skill
+  // so each line gets its own subtle fill underneath.
+  const defs = skillEntries.map((sk, i) => \`
+    <linearGradient id="grad-\${i}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="\${sk.color}" stop-opacity="0.22"/>
+      <stop offset="100%" stop-color="\${sk.color}" stop-opacity="0"/>
+    </linearGradient>
+  \`).join('');
+
+  const lineGroups = skillEntries.map((sk, i) => {
+    const linePath = sk.series.map((p, idx) => \`\${idx === 0 ? 'M' : 'L'} \${xFor(idx).toFixed(2)} \${yFor(p.sessions).toFixed(2)}\`).join(' ');
+    const areaPath = \`\${linePath} L \${xFor(sk.series.length - 1).toFixed(2)} \${padT + innerH} L \${padL} \${padT + innerH} Z\`;
+    return \`
+      <path d="\${areaPath}" fill="url(#grad-\${i})" />
+      <path d="\${linePath}" fill="none" stroke="\${sk.color}" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"/>
+    \`;
+  }).join('');
+
+  // Legend: render as inline-block badges above the chart. Sort largest first
+  // so the top contributor is leftmost in the legend.
+  const legendItems = [...skillEntries].sort((a, b) => b.total - a.total);
   el.innerHTML = \`
+    <div class="chart-legend">
+      \${legendItems.map(sk => \`
+        <span class="legend-item">
+          <span class="legend-swatch" style="background:\${sk.color}"></span>
+          \${esc(sk.name)}
+          <span class="legend-num">\${fmtNum(sk.total)}</span>
+        </span>
+      \`).join('')}
+    </div>
     <svg class="chart-svg" viewBox="0 0 \${W} \${H}" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="chart-gradient" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="#818cf8" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
+      <defs>\${defs}</defs>
       <g class="chart-grid">
         \${yTicks.map(t => \`<line x1="\${padL}" x2="\${W - padR}" y1="\${yFor(t)}" y2="\${yFor(t)}"/>\`).join('')}
       </g>
       <g class="chart-axis">
-        \${yTicks.map(t => \`<text class="chart-label" x="\${padL - 8}" y="\${yFor(t) + 3}" text-anchor="end">\${t}</text>\`).join('')}
+        \${yTicks.map(t => \`<text class="chart-label" x="\${padL - 8}" y="\${yFor(t) + 3}" text-anchor="end">\${fmtNum(t)}</text>\`).join('')}
         \${xLabels.map(x => \`<text class="chart-label" x="\${xFor(x.i)}" y="\${H - 8}" text-anchor="middle">\${esc(x.label)}</text>\`).join('')}
       </g>
-      <path class="chart-area" d="\${areaPath}"/>
-      <path class="chart-line" d="\${linePath}"/>
-      \${series.map((s, i) => s.sessions > 0 ? \`<circle class="chart-dot" cx="\${xFor(i)}" cy="\${yFor(s.sessions)}" r="2.5"><title>\${esc(s.day)} · \${s.sessions} sessions</title></circle>\` : '').join('')}
+      \${lineGroups}
     </svg>
   \`;
 }
@@ -768,9 +812,9 @@ if (!IS_DEMO) setInterval(loadAll, 60000);  // refresh every 60s (skip in demo)
 // ─── Demo data generator ─────────────────────────────────────
 // Used by `?demo=1` to populate the dashboard with a believable rising
 // curve for the screenshot we use in launch comms. Generates 30 days of
-// first-tree sessions on a hockey-stick that's visible from day 1
-// (start ~400, end ~10k) with realistic mid-window growth spurts,
-// weekend dips, and a few error/abandoned outcomes.
+// activity across 4 sub-skills of first-tree, each with its own ramp
+// timing and weight — so the multi-line chart looks busy and product-
+// shaped (not a single boring curve).
 function demoData(kind) {
   const today = new Date(); today.setUTCHours(0, 0, 0, 0);
   const days = [];
@@ -779,79 +823,110 @@ function demoData(kind) {
     days.push(d.toISOString().slice(0, 10));
   }
 
-  // Visual goal: chart shouldn't look flat-then-spike. Start at ~400
-  // and end ~10k — a 25× lift over 30 days — so the line is clearly
-  // climbing from the very first data point. Add a mid-window spike
-  // around day 18 (e.g. "got picked up by a newsletter") plus daily
-  // noise so the line has texture, not a smooth boring curve.
-  const dauSeries = days.map((day, i) => {
-    // Base ramp: 400 -> 10000 (25× lift), exponential
-    const base = 400 * Math.pow(25, i / 29);
-    // Day-of-week dip (weekends lower)
-    const dow = new Date(day + 'T00:00:00Z').getUTCDay();
-    const dipFactor = (dow === 0 || dow === 6) ? 0.78 : 1.0;
-    // Mid-window growth spurt (think: HN front page on day 18)
-    const spike = 1 + 0.45 * Math.exp(-Math.pow((i - 18) / 2.5, 2));
-    // Deterministic pseudo-noise — bigger amplitude so peaks/dips
-    // are visible early in the chart too
-    const noise = 0.78 + 0.42 * Math.abs(Math.sin(i * 1.7 + 2.3));
-    const sessions = Math.round(base * dipFactor * spike * noise);
-    const events = Math.round(sessions * (1.6 + 0.2 * Math.sin(i)));
-    const dau = Math.round(sessions * (0.55 + 0.08 * Math.cos(i)));
-    return { day, skill: 'first-tree', dau, sessions, events };
-  });
+  // Four sub-skills with distinct trajectories. Each has its own
+  // start/end size, ramp shape, and spike timing — so the chart shows
+  // them crossing over and interleaving rather than being parallel.
+  // (Reads like a real product: some features dominate early, others
+  // catch up after a release.)
+  const subSkills = [
+    // skill        color       start  end    spikeDay spikeBoost  noisePhase
+    { name: 'plan',    color: '#818cf8', start:  220, end: 6800,  spikeDay: 14, spikeBoost: 0.55, phase: 0.0 },
+    { name: 'design',  color: '#22d3ee', start:  120, end: 5400,  spikeDay: 22, spikeBoost: 0.40, phase: 1.1 },
+    { name: 'publish', color: '#c084fc', start:   80, end: 4300,  spikeDay: 18, spikeBoost: 0.65, phase: 2.3 },
+    { name: 'review',  color: '#f472b6', start:   45, end: 3100,  spikeDay: 25, spikeBoost: 0.50, phase: 3.7 },
+  ];
+
+  const dauSeries = [];
+  for (const sk of subSkills) {
+    for (let i = 0; i < days.length; i++) {
+      const day = days[i];
+      const ratio = sk.end / sk.start;
+      const base = sk.start * Math.pow(ratio, i / 29);
+      const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+      const dipFactor = (dow === 0 || dow === 6) ? 0.78 : 1.0;
+      const spike = 1 + sk.spikeBoost * Math.exp(-Math.pow((i - sk.spikeDay) / 2.2, 2));
+      const noise = 0.78 + 0.42 * Math.abs(Math.sin(i * 1.7 + sk.phase));
+      const sessions = Math.round(base * dipFactor * spike * noise);
+      const events = Math.round(sessions * (1.6 + 0.2 * Math.sin(i + sk.phase)));
+      const dau = Math.round(sessions * (0.55 + 0.08 * Math.cos(i + sk.phase)));
+      dauSeries.push({ day, skill: sk.name, color: sk.color, dau, sessions, events });
+    }
+  }
 
   if (kind === 'dau') return dauSeries;
 
   if (kind === 'summary') {
-    const totalEvents = dauSeries.reduce((s, r) => s + r.events, 0);
-    const totalSessions = dauSeries.reduce((s, r) => s + r.sessions, 0);
-    const maxDau = Math.max(...dauSeries.map(r => r.dau));
-    const successes = Math.round(totalEvents * 0.946);
-    const errors = Math.round(totalEvents * 0.038);
-    const abandoned = totalEvents - successes - errors;
-    return [{
-      skill: 'first-tree',
-      total_events: totalEvents,
-      users: maxDau,
-      sessions: totalSessions,
-      successes,
-      errors,
-      abandoned,
-      success_rate_pct: 94.6,
-      avg_duration_s: 47,
-      last_seen: new Date().toISOString(),
-    }];
+    // One row per sub-skill — the dashboard's loadStats aggregates
+    // them into the top stat cards. Per-skill success rates differ
+    // slightly so they look like real product breakdowns.
+    const successPctBySkill = { plan: 96.4, design: 94.1, publish: 92.8, review: 95.7 };
+    const out = [];
+    for (const sk of subSkills) {
+      const rows = dauSeries.filter(r => r.skill === sk.name);
+      const totalEvents = rows.reduce((s, r) => s + r.events, 0);
+      const totalSessions = rows.reduce((s, r) => s + r.sessions, 0);
+      const maxDau = Math.max(...rows.map(r => r.dau));
+      const successRate = successPctBySkill[sk.name];
+      const successes = Math.round(totalEvents * (successRate / 100));
+      const errors = Math.round(totalEvents * 0.035);
+      const abandoned = totalEvents - successes - errors;
+      out.push({
+        skill: sk.name,
+        total_events: totalEvents,
+        users: maxDau,
+        sessions: totalSessions,
+        successes,
+        errors,
+        abandoned,
+        success_rate_pct: successRate,
+        avg_duration_s: 40 + Math.round(Math.abs(Math.sin(sk.phase)) * 30),
+        last_seen: new Date().toISOString(),
+      });
+    }
+    return out;
   }
 
   if (kind === 'steps') {
+    // Step breakdown across the 4 sub-skills. Roughly match the volumes
+    // in the dau series so the math feels coherent.
     return [
-      { skill: 'first-tree', step: 'plan',     runs: 4821, ok: 4720, err:  62, bail:  39, success_pct: 97.9 },
-      { skill: 'first-tree', step: 'design',   runs: 4602, ok: 4391, err: 142, bail:  69, success_pct: 95.4 },
-      { skill: 'first-tree', step: 'generate', runs: 4485, ok: 4203, err: 217, bail:  65, success_pct: 93.7 },
-      { skill: 'first-tree', step: 'review',   runs: 4192, ok: 4051, err:  88, bail:  53, success_pct: 96.6 },
-      { skill: 'first-tree', step: 'publish',  runs: 3987, ok: 3812, err: 124, bail:  51, success_pct: 95.6 },
-      { skill: 'first-tree', step: 'lint',     runs: 3756, ok: 3690, err:  41, bail:  25, success_pct: 98.2 },
+      { skill: 'plan',    step: 'outline',  runs: 5821, ok: 5612, err:  91, bail: 118, success_pct: 96.4 },
+      { skill: 'plan',    step: 'expand',   runs: 4602, ok: 4451, err:  82, bail:  69, success_pct: 96.7 },
+      { skill: 'design',  step: 'wireframe',runs: 4485, ok: 4222, err: 197, bail:  66, success_pct: 94.1 },
+      { skill: 'design',  step: 'palette',  runs: 3192, ok: 3041, err:  98, bail:  53, success_pct: 95.3 },
+      { skill: 'publish', step: 'build',    runs: 3787, ok: 3499, err: 234, bail:  54, success_pct: 92.4 },
+      { skill: 'publish', step: 'deploy',   runs: 3756, ok: 3501, err: 215, bail:  40, success_pct: 93.2 },
+      { skill: 'review',  step: 'lint',     runs: 2756, ok: 2691, err:  41, bail:  24, success_pct: 97.6 },
+      { skill: 'review',  step: 'critique', runs: 2102, ok: 2003, err:  62, bail:  37, success_pct: 95.3 },
     ];
   }
 
   if (kind === 'events') {
-    const steps = ['publish', 'review', 'generate', 'design', 'plan', 'lint'];
+    const events = [
+      // skill, step, success-rate-weight
+      ['plan',    'outline'],
+      ['plan',    'expand'],
+      ['design',  'wireframe'],
+      ['design',  'palette'],
+      ['publish', 'build'],
+      ['publish', 'deploy'],
+      ['review',  'lint'],
+      ['review',  'critique'],
+    ];
     const errClasses = ['cloudflare_timeout', 'supabase_429', 'git_push_rejected', 'lint_failed'];
     const out = [];
     const now = new Date();
     for (let i = 0; i < 50; i++) {
       const ts = new Date(now.getTime() - i * 1000 * (45 + Math.floor(Math.abs(Math.sin(i*1.7))*180)));
-      // Mostly success with a small fraction of errors / abandoned
       const seed = Math.abs(Math.sin(i * 2.7)) * 100;
       let outcome = 'success', err = null;
       if (seed > 96) { outcome = 'error'; err = errClasses[i % errClasses.length]; }
       else if (seed > 92) outcome = 'abandoned';
-      const step = steps[i % steps.length];
+      const [skill, step] = events[i % events.length];
       const dur = Math.round(20 + Math.abs(Math.cos(i * 1.3)) * 140);
       out.push({
         t: ts.toISOString().slice(0, 19).replace('T', ' '),
-        skill: 'first-tree',
+        skill,
         event_type: 'skill_run',
         outcome,
         step,
