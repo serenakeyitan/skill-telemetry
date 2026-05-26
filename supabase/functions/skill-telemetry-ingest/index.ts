@@ -149,9 +149,21 @@ function sanitize(e: IncomingEvent): Record<string, unknown> | null {
     return /^[a-z0-9_-]+$/i.test(s) ? s.toLowerCase() : null;
   };
 
+  // F14 fix: validate ts is a real ISO 8601 timestamp before insert.
+  // A malformed string crashes the INSERT (timestamptz parse error),
+  // which fails the whole batch (HTTP 500), which means the client
+  // cursor never advances → infinite retry loop.
+  let safeTs: string;
+  if (typeof e.ts === "string") {
+    const parsed = Date.parse(e.ts);
+    safeTs = Number.isFinite(parsed) ? new Date(parsed).toISOString() : new Date().toISOString();
+  } else {
+    safeTs = new Date().toISOString();
+  }
+
   return {
     schema_version: schemaVersion,
-    ts: typeof e.ts === "string" ? e.ts : new Date().toISOString(),
+    ts: safeTs,
     skill: e.skill.slice(0, MAX_SKILL_LEN),
     skill_version: clampStr(e.skill_version, MAX_SKILL_VERSION_LEN),
     event_type: eventType,

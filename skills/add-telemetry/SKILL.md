@@ -274,51 +274,51 @@ pool, **copy the config** instead of creating a new project. Author
 sees all their skills' data in one Supabase, exactly like gstack.
 
 ```bash
-if [ -n "$EXISTING_AUTHOR_CONFIG" ]; then
+if [ -n "${EXISTING_AUTHOR_CONFIG:-}" ]; then
+  # Reuse existing author pool — author sees all their skills' data in
+  # one Supabase, exactly like gstack does.
   mkdir -p "$TARGET/telemetry/supabase"
   cp "$EXISTING_AUTHOR_CONFIG" "$TARGET/telemetry/supabase/config.sh"
-  # Extract project ref from URL for downstream steps
   PROJECT_URL=$(grep -oE 'https://[a-z0-9]+\.supabase\.co' "$TARGET/telemetry/supabase/config.sh" | head -1)
   PROJECT_REF=$(echo "$PROJECT_URL" | sed -n 's|https://\([a-z0-9]*\)\.supabase\.co.*|\1|p')
   ANON_KEY=$(grep -oE 'sb_publishable_[A-Za-z0-9_]+|eyJ[A-Za-z0-9._-]+' "$TARGET/telemetry/supabase/config.sh" | head -1)
   echo "✅ Reusing author pool: $PROJECT_URL"
   echo "   (skipping project create, schema deploy, edge function deploy — already done)"
-  # Skip directly to Step 8 (copy template files)
+  # Continue at Step 8 (copy template files) — skip Steps 6 sub-tasks below.
 else
-  # Original Step 6: create new project
-PROJECT_NAME="${SKILL_NAME}-telemetry"
-DB_PASS=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-24)
+  # No existing pool — create a new Supabase project.
+  PROJECT_NAME="${SKILL_NAME}-telemetry"
+  DB_PASS=$(openssl rand -base64 32 | tr -d '/+=' | cut -c1-24)
 
-# Save password for `supabase link` later. NOT committed.
-mkdir -p "$TARGET/telemetry"
-echo "$DB_PASS" > "$TARGET/telemetry/.db-password"
-chmod 600 "$TARGET/telemetry/.db-password"
+  # Save password for `supabase link` later. NOT committed.
+  mkdir -p "$TARGET/telemetry"
+  echo "$DB_PASS" > "$TARGET/telemetry/.db-password"
+  chmod 600 "$TARGET/telemetry/.db-password"
 
-# Create. DON'T specify --size — that flag only works on paid plans
-# (dogfood confirmed: free tier returns "Instance size cannot be
-# specified for free plan organizations").
-echo "Creating project '$PROJECT_NAME' in org $ORG_ID..."
-supabase projects create "$PROJECT_NAME" \
-  --org-id "$ORG_ID" \
-  --db-password "$DB_PASS" \
-  --region us-east-1 2>&1 | tee /tmp/.add-tel-create-out
+  # Don't specify --size — that flag only works on paid plans
+  # (dogfood: free tier returns "Instance size cannot be specified
+  # for free plan organizations").
+  echo "Creating project '$PROJECT_NAME' in org $ORG_ID..."
+  supabase projects create "$PROJECT_NAME" \
+    --org-id "$ORG_ID" \
+    --db-password "$DB_PASS" \
+    --region us-east-1 2>&1 | tee /tmp/.add-tel-create-out
 
-PROJECT_REF=$(grep -oE 'project/[a-z]{20}' /tmp/.add-tel-create-out | head -1 | cut -d/ -f2)
-rm -f /tmp/.add-tel-create-out
+  PROJECT_REF=$(grep -oE 'project/[a-z]{20}' /tmp/.add-tel-create-out | head -1 | cut -d/ -f2)
+  rm -f /tmp/.add-tel-create-out
 
-if [ -z "$PROJECT_REF" ]; then
-  echo "FATAL: couldn't parse project ref from create output"
-  exit 1
+  if [ -z "$PROJECT_REF" ]; then
+    echo "FATAL: couldn't parse project ref from create output"
+    exit 1
+  fi
+  echo "✅ Project created: $PROJECT_REF"
 fi
-echo "✅ Project created: $PROJECT_REF"
 ```
 
 If the user's free tier is full (2-project cap), tell them:
 "Your Supabase free tier has 2 projects already. Either delete one at
 https://supabase.com/dashboard or upgrade to Pro." Then exit. Do not
 auto-delete anything.
-
-fi   # end "no existing author pool" branch
 
 ## Step 7 — Wait for project to be ready + fetch API keys
 

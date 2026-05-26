@@ -56,7 +56,12 @@ STOP_REASON="$(jqget '.reason')"
 # We grep for the literal pattern '"name":"Skill"..."skill":"X"' and
 # nothing else. We do NOT load the transcript into memory or read
 # message content. This is auditable: open this script and verify.
-[ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ] && exit 0
+#
+# F4 fix: explicit if/then/fi avoids the `[ A ] || [ B ] && exit`
+# precedence trap where short-circuit-and binds tighter than ||.
+if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
+  exit 0
+fi
 
 # Find all skill invocations in this session
 INVOKED_SKILLS=$(grep -o '"name":"Skill"[^}]*"skill":"[^"]*"' "$TRANSCRIPT" 2>/dev/null \
@@ -69,17 +74,19 @@ INVOKED_SKILLS=$(grep -o '"name":"Skill"[^}]*"skill":"[^"]*"' "$TRANSCRIPT" 2>/d
 # fires for office-hours sessions.
 echo "$INVOKED_SKILLS" | grep -qx "$TARGET_SKILL" || exit 0
 
-# ─── Last 5 lines outcome heuristic ──────────────────────────
+# ─── Outcome heuristic — NO transcript text captured ────────
+# F3 fix: previously we extracted the last `"text":"..."` snippet from
+# the transcript tail and shipped it as error_message. That violated
+# the project's "no prompts / no replies" privacy claim, because the
+# transcript tail often contains Claude's reply. We now emit ONLY a
+# low-cardinality class tag — no message body — so the privacy promise
+# in PRIVACY.md and README is honest.
 LAST_TAIL="$(tail -5 "$TRANSCRIPT" 2>/dev/null || true)"
 OUTCOME="completed"
 ERROR_CLASS=""
-ERROR_MESSAGE=""
 
 if echo "$LAST_TAIL" | grep -qi '"is_error":true\|"type":"error"'; then
   OUTCOME="error"
-  # Pull a short error tag for context — cap at 160 chars hard
-  ERR_TEXT="$(echo "$LAST_TAIL" | grep -o '"text":"[^"]\{0,160\}"' | tail -1 | cut -d'"' -f4 || true)"
-  [ -n "$ERR_TEXT" ] && ERROR_MESSAGE="$ERR_TEXT"
   ERROR_CLASS="hook_detected_error"
 elif echo "$LAST_TAIL" | grep -qi 'interrupted\|abort'; then
   OUTCOME="abandoned"
@@ -115,11 +122,14 @@ if [ -z "$DUR" ]; then
   NOW_EPOCH=$(date +%s)
   CUTOFF_EPOCH=$(( NOW_EPOCH - 86400 ))  # 24h ago
 
-  # First tdoc skill call timestamp
+  # Most recent skill-tool-call timestamp. F11 fix: was `head -1` which
+  # picked the FIRST occurrence ever — meaning if today's session reused
+  # a transcript from a prior day's invocation of the same skill,
+  # duration was over-reported. Using `tail -1` picks today's call.
   SKILL_TS=$(grep '"skill":"'"$TARGET_SKILL"'"' "$TRANSCRIPT" 2>/dev/null \
     | grep -oE '"timestamp":"[^"]+"' \
     | cut -d'"' -f4 \
-    | head -1)
+    | tail -1)
 
   if [ -n "$SKILL_TS" ]; then
     SKILL_EPOCH=$(TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "${SKILL_TS%%.*}" "+%s" 2>/dev/null \
@@ -160,7 +170,6 @@ fi
   --step "hook-captured" \
   ${DURATION_ARG} \
   ${ERROR_CLASS:+--error-class "$ERROR_CLASS"} \
-  ${ERROR_MESSAGE:+--error-message "$ERROR_MESSAGE"} \
   2>/dev/null || true
 
 exit 0

@@ -40,6 +40,8 @@ TZ_NAME="$(detect_tz)"
 LIMIT=20
 SKILL_FILTER=""
 FAILURES_ONLY=0
+SUMMARY=0
+DAU=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -47,8 +49,15 @@ while [ $# -gt 0 ]; do
     --limit)     LIMIT="$2"; shift 2 ;;
     --skill)     SKILL_FILTER="$2"; shift 2 ;;
     --failures)  FAILURES_ONLY=1; shift ;;
+    --summary)   SUMMARY=1; shift ;;
+    --dau)       DAU=1; shift ;;
     -h|--help)
       head -22 "$0" | sed 's/^# \{0,1\}//'
+      echo ""
+      echo "Modes:"
+      echo "  (default)     Recent events table (filterable)"
+      echo "  --summary     Per-skill overview: events / users / sessions / success rate"
+      echo "  --dau         Daily active users + sessions per skill"
       exit 0
       ;;
     *)
@@ -101,18 +110,49 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 [ -z "$ACCESS_TOKEN" ] && { echo "FATAL: no SUPABASE_ACCESS_TOKEN. Run 'supabase login' or export the env var."; exit 1; }
 
-# ─── Build SQL ──────────────────────────────────────────────
-SQL="select to_char(ts_local, 'YYYY-MM-DD HH24:MI:SS') as t, skill, coalesce(skill_version, '-') as ver, coalesce(event_type, 'skill_run') as evt, outcome, coalesce(step, '-') as step, case when duration_s is null then '-' else duration_s::text end as dur, coalesce(error_class, '') as err_class, coalesce(error_message, '') as err_msg from skill_events_in_tz('$TZ_NAME')"
+# ─── Validate inputs before building SQL (F8 from audit) ──────
+# TZ_NAME and SKILL_FILTER end up interpolated into SQL strings.
+# Whitelist their character sets to prevent injection if either ever
+# came from an attacker-controlled source (e.g. a weird /etc/localtime
+# symlink, or a typo'd --skill flag).
+if ! echo "$TZ_NAME" | grep -qE '^[A-Za-z0-9_/+-]+$'; then
+  echo "FATAL: TZ '$TZ_NAME' contains unsafe characters." >&2
+  exit 2
+fi
+if [ -n "$SKILL_FILTER" ] && ! echo "$SKILL_FILTER" | grep -qE '^[A-Za-z0-9_-]+$'; then
+  echo "FATAL: --skill '$SKILL_FILTER' contains unsafe characters (allowed: A-Za-z0-9_-)" >&2
+  exit 2
+fi
 
+# ─── Build SQL based on mode ──────────────────────────────────
 WHERE_PARTS=()
 [ -n "$SKILL_FILTER" ] && WHERE_PARTS+=("skill = '$SKILL_FILTER'")
-[ "$FAILURES_ONLY" = "1" ] && WHERE_PARTS+=("outcome in ('error','abandoned')")
 
-if [ ${#WHERE_PARTS[@]} -gt 0 ]; then
-  WHERE_CLAUSE=$(IFS=' and '; echo "${WHERE_PARTS[*]}")
-  SQL="$SQL where $WHERE_CLAUSE"
+if [ "$SUMMARY" = "1" ]; then
+  # Per-skill overview from skill_usage_summary view
+  SQL="select skill, total_events, users, sessions, successes, errors, abandoned, success_rate_pct, coalesce(avg_duration_s::text, '-') as avg_dur_s, to_char(last_seen at time zone '$TZ_NAME', 'MM-DD HH24:MI') as last_seen from skill_usage_summary"
+  if [ ${#WHERE_PARTS[@]} -gt 0 ]; then
+    WHERE_CLAUSE=$(IFS=' and '; echo "${WHERE_PARTS[*]}")
+    SQL="$SQL where $WHERE_CLAUSE"
+  fi
+elif [ "$DAU" = "1" ]; then
+  # Daily breakdown
+  SQL="select to_char(day, 'YYYY-MM-DD') as day, skill, dau, sessions, events from skill_dau"
+  if [ ${#WHERE_PARTS[@]} -gt 0 ]; then
+    WHERE_CLAUSE=$(IFS=' and '; echo "${WHERE_PARTS[*]}")
+    SQL="$SQL where $WHERE_CLAUSE"
+  fi
+  SQL="$SQL limit $LIMIT"
+else
+  # Recent events (default)
+  SQL="select to_char(ts_local, 'YYYY-MM-DD HH24:MI:SS') as t, skill, coalesce(skill_version, '-') as ver, coalesce(event_type, 'skill_run') as evt, outcome, coalesce(step, '-') as step, case when duration_s is null then '-' else duration_s::text end as dur, coalesce(error_class, '') as err_class, coalesce(error_message, '') as err_msg from skill_events_in_tz('$TZ_NAME')"
+  [ "$FAILURES_ONLY" = "1" ] && WHERE_PARTS+=("outcome in ('error','abandoned')")
+  if [ ${#WHERE_PARTS[@]} -gt 0 ]; then
+    WHERE_CLAUSE=$(IFS=' and '; echo "${WHERE_PARTS[*]}")
+    SQL="$SQL where $WHERE_CLAUSE"
+  fi
+  SQL="$SQL limit $LIMIT"
 fi
-SQL="$SQL limit $LIMIT"
 
 # ─── Query + render ─────────────────────────────────────────
 echo "TZ: $TZ_NAME"
@@ -124,15 +164,33 @@ RESP=$(curl -s --max-time 15 \
   -H "Content-Type: application/json" \
   -d "$(jq -n --arg q "$SQL" '{query: $q}')")
 
-if echo "$RESP" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+if ! echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  echo "API error:"
+  echo "$RESP" | jq . 2>/dev/null || echo "$RESP"
+  exit 1
+fi
+
+if ! echo "$RESP" | jq -e 'length > 0' >/dev/null 2>&1; then
+  echo "(no rows match)"
+  exit 0
+fi
+
+if [ "$SUMMARY" = "1" ]; then
+  echo "$RESP" | jq -r '
+    (["SKILL","EVENTS","USERS","SESSIONS","✓SUCC","✗ERR","⊘ABDN","SUCC%","AVG_DUR","LAST_SEEN"]),
+    (["-----","------","-----","--------","-----","----","-----","-----","-------","---------"]),
+    (.[] | [.skill, (.total_events|tostring), (.users|tostring), (.sessions|tostring), (.successes|tostring), (.errors|tostring), (.abandoned|tostring), (.success_rate_pct|tostring), .avg_dur_s, .last_seen])
+    | @tsv' | column -t -s $'\t'
+elif [ "$DAU" = "1" ]; then
+  echo "$RESP" | jq -r '
+    (["DAY","SKILL","DAU","SESSIONS","EVENTS"]),
+    (["---","-----","---","--------","------"]),
+    (.[] | [.day, .skill, (.dau|tostring), (.sessions|tostring), (.events|tostring)])
+    | @tsv' | column -t -s $'\t'
+else
   echo "$RESP" | jq -r '
     (["TIME","SKILL","VER","EVENT","OUTCOME","STEP","DUR","ERR_CLASS","ERR_MSG"]),
     (["----","-----","---","-----","-------","----","---","---------","-------"]),
     (.[] | [.t, .skill, .ver, .evt, .outcome, .step, .dur, .err_class, (.err_msg | if length > 40 then .[:37] + "..." else . end)])
     | @tsv' | column -t -s $'\t'
-elif echo "$RESP" | jq -e 'type == "array"' >/dev/null 2>&1; then
-  echo "(no rows match)"
-else
-  echo "API error:"
-  echo "$RESP" | jq . 2>/dev/null || echo "$RESP"
 fi

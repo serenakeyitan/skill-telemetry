@@ -12,3 +12,6 @@ supabase/config.sh
 .cursor-*
 .start-*
 supabase/.temp/
+
+# Per-skill Supabase configs (each fork has its own; never commit)
+**/supabase/config.sh

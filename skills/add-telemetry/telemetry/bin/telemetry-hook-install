@@ -44,6 +44,15 @@ done
 
 [ -z "$SKILL" ] && { echo "ERROR: --skill <name> required (e.g. --skill tdoc)" >&2; exit 2; }
 
+# F22 fix: validate skill name. We embed it into a shell command string
+# in settings.json; a name containing quotes/spaces/backticks would
+# break the resulting hook. Restrict to a-z A-Z 0-9 _ -.
+if ! echo "$SKILL" | grep -qE '^[A-Za-z0-9_-]+$'; then
+  echo "ERROR: --skill '$SKILL' contains unsafe characters." >&2
+  echo "Allowed: letters, digits, underscore, hyphen." >&2
+  exit 2
+fi
+
 # Resolve absolute paths
 BIN_DIR="$(cd "$(dirname "$0")" 2>/dev/null && pwd)"
 HOOK_SCRIPT="$BIN_DIR/telemetry-hook"

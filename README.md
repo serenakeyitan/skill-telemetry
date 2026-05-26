@@ -59,16 +59,24 @@ template to your skill, point it at your own Supabase project, and you do.
 
 Every skill run produces ONE row:
 
-| Field             | Example                            | Purpose                       |
-|-------------------|------------------------------------|-------------------------------|
-| `ts`              | `2026-05-20T16:32:11Z`             | When                          |
-| `skill`           | `my-cool-skill`                    | Which skill (you set this)    |
-| `outcome`         | `success` / `error` / `abandoned`  | How it ended                  |
-| `duration_s`      | `87`                               | How long it took              |
-| `error_detail`    | `"supabase 500"` or null           | Short tag for failure         |
-| `step`            | `"fetch-data"` or null             | Which step (if failed)        |
-| `session_id`      | `abc-123`                          | Claude session                |
-| `installation_id` | `fd0c3fb0-4087-...`                | Random UUID per user machine  |
+| Field             | Example                              | Purpose                              |
+|-------------------|--------------------------------------|--------------------------------------|
+| `schema_version`  | `3`                                  | Wire format version                  |
+| `ts`              | `2026-05-22T16:32:11Z`               | When (UTC)                           |
+| `skill`           | `my-cool-skill`                      | Which skill (you set this)           |
+| `skill_version`   | `0.2.0` or null                      | Version of the skill that ran        |
+| `event_type`      | `skill_run` / `upgrade_prompted`     | Event taxonomy                       |
+| `outcome`         | `success` / `error` / `abandoned`    | How it ended                         |
+| `duration_s`      | `87` or null                         | How long it took                     |
+| `step`            | `publish` / `edit` / null            | Which sub-command / step             |
+| `error_class`     | `cloudflare_timeout` or null         | Low-cardinality error tag            |
+| `error_message`   | `"curl timeout 15s"` (≤400) or null  | Higher-cardinality detail (skill self-report only) |
+| `session_id`      | `abc-123`                            | Claude session                       |
+| `installation_id` | `fd0c3fb0-4087-...`                  | Random UUID per user machine         |
+| `os` / `arch`     | `darwin` / `arm64`                   | OS + CPU architecture                |
+| `sessions`        | `1` (or higher when concurrent)      | Concurrent active sessions counter   |
+| `source`          | `live` / `replay`                    | Live submit vs cursor-replay         |
+| `error_detail`    | (deprecated, v1 only)                | Legacy field, kept for back-compat   |
 
 `installation_id` is a UUID generated once on the user's machine. It does
 NOT identify the human — there's no email, no IP, no hostname. It's there
@@ -112,16 +120,19 @@ to Claude and you answer one question.
 
    > Use /add-telemetry to install telemetry for this skill.
 
-4. Answer the one question (Supabase URL + anon key, paste both at
-   once). Claude does the rest: copies files, writes config, generates
-   the schema for you to paste, gives you the three deploy commands,
-   substitutes paths into your SKILL.md, runs the smoke test, and
-   reports success.
+4. Claude runs the meta-skill. **Path A** (default) is fully automated
+   via the Supabase Management API + CLI: creates a new project,
+   deploys the schema, deploys the edge function, installs telemetry
+   into your skill, runs a smoke test — total ~3 interactions (one
+   GitHub browser auth for Supabase + two acknowledgments).
+   **Path B** (manual fallback) is for cases where you already have
+   a Supabase project — Claude asks once for URL + anon key, you paste,
+   the rest is automated.
 
-5. The meta-skill was tested over 4 iterations using subagents simulating
-   real installs. Current score: **9/10 ready-to-ship** (the 1 missing
-   point is "Supabase project creation still requires opening the
-   dashboard once" — Claude can't sign up for an account on your behalf).
+5. Tested via subagent simulations on a fake target skill. One known
+   limitation: Claude can't sign up for a Supabase account on your
+   behalf, so first-time users must visit supabase.com once to create
+   an account before invoking the meta-skill.
 
 See `skills/add-telemetry/SKILL.md` for the full procedure.
 
@@ -273,7 +284,9 @@ maintainer sees who's running updates and how many skills got
 upgraded. (You can see this in your own pool too — it's per-author.)
 
 What it touches per skill:
-- `telemetry/bin/*` (telemetry-log, telemetry-sync, telemetry-update-check, skill-events)
+- `telemetry/bin/*` (telemetry-log, telemetry-sync, telemetry-update-check,
+  telemetry-upgrade-decide, telemetry-hook, telemetry-hook-install,
+  telemetry-hook-uninstall, skill-events)
 - `telemetry/SKILL.md.snippet`
 - `telemetry/PRIVACY.md`
 

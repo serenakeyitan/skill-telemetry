@@ -57,7 +57,7 @@ Edit `wrangler.toml`:
 ### 3. Create KV namespace for sessions
 
 ```bash
-wrangler kv:namespace create SESSIONS
+wrangler kv namespace create SESSIONS
 ```
 
 Copy the printed `id = "..."` into `wrangler.toml` under `[[kv_namespaces]]`.

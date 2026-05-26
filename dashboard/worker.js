@@ -28,15 +28,15 @@
 //   7. Worker fetches /user → checks login === SKILL_TELEMETRY_OWNER
 //   8. Sets session cookie, redirects to dashboard
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type,Authorization',
-};
+// No CORS — this is a single-origin dashboard. Owner-only data should
+// not be readable from any external origin. The session cookie is
+// SameSite=Lax + HttpOnly, but we tighten the perimeter further by
+// rejecting cross-origin reads entirely. Auth + data endpoints all
+// return same-origin only. F6 from audit.
 
 const json = (data, init = {}) => new Response(JSON.stringify(data), {
   ...init,
-  headers: { 'Content-Type': 'application/json', ...CORS, ...(init.headers || {}) },
+  headers: { 'Content-Type': 'application/json', ...(init.headers || {}) },
 });
 const html = (body, init = {}) => new Response(body, {
   ...init,
@@ -346,6 +346,17 @@ function dashboardHtml(owner) {
 </main>
 
 <script>
+// HTML-escape all interpolated values. Critical: skill/step/error_class/
+// error_message all flow from untrusted client telemetry — any user of a
+// skill could craft a payload like skill='<img src=x onerror=...>' that
+// would XSS the dashboard if we interpolated raw. F2 from audit.
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
 async function fetchData(endpoint) {
   const skill = document.getElementById('filter-skill').value;
   const window = document.getElementById('filter-window').value;
@@ -365,6 +376,7 @@ async function loadStats() {
   if (!data) return;
 
   // Populate skill filter (only first time)
+  // Uses .value/.textContent which auto-escapes — safe.
   const skillFilter = document.getElementById('filter-skill');
   if (skillFilter.options.length === 1) {
     for (const row of data) {
@@ -407,11 +419,11 @@ async function loadDau() {
       <tbody>
         \${data.map(r => \`
           <tr>
-            <td class="mono">\${r.day}</td>
-            <td>\${r.skill}</td>
-            <td>\${r.dau}</td>
-            <td>\${r.sessions}</td>
-            <td>\${r.events}</td>
+            <td class="mono">\${esc(r.day)}</td>
+            <td>\${esc(r.skill)}</td>
+            <td>\${esc(r.dau)}</td>
+            <td>\${esc(r.sessions)}</td>
+            <td>\${esc(r.events)}</td>
           </tr>
         \`).join('')}
       </tbody>
@@ -431,13 +443,13 @@ async function loadSteps() {
       <tbody>
         \${data.map(r => \`
           <tr>
-            <td>\${r.step || '-'}</td>
-            <td>\${r.skill}</td>
-            <td>\${r.runs}</td>
-            <td class="outcome-success">\${r.ok}</td>
-            <td class="outcome-error">\${r.err}</td>
-            <td class="outcome-abandoned">\${r.bail}</td>
-            <td>\${r.success_pct}%</td>
+            <td>\${esc(r.step || '-')}</td>
+            <td>\${esc(r.skill)}</td>
+            <td>\${esc(r.runs)}</td>
+            <td class="outcome-success">\${esc(r.ok)}</td>
+            <td class="outcome-error">\${esc(r.err)}</td>
+            <td class="outcome-abandoned">\${esc(r.bail)}</td>
+            <td>\${esc(r.success_pct)}%</td>
           </tr>
         \`).join('')}
       </tbody>
@@ -457,13 +469,13 @@ async function loadEvents() {
       <tbody>
         \${data.map(r => \`
           <tr>
-            <td class="mono">\${r.t}</td>
-            <td>\${r.skill}</td>
-            <td>\${r.event_type || 'skill_run'}</td>
-            <td class="outcome-\${r.outcome || 'unknown'}">\${r.outcome || '-'}</td>
-            <td>\${r.step || '-'}</td>
-            <td>\${r.duration_s != null ? r.duration_s + 's' : '-'}</td>
-            <td class="outcome-error">\${r.error_class || ''}</td>
+            <td class="mono">\${esc(r.t)}</td>
+            <td>\${esc(r.skill)}</td>
+            <td>\${esc(r.event_type || 'skill_run')}</td>
+            <td class="outcome-\${esc(r.outcome || 'unknown')}">\${esc(r.outcome || '-')}</td>
+            <td>\${esc(r.step || '-')}</td>
+            <td>\${r.duration_s != null ? esc(r.duration_s + 's') : '-'}</td>
+            <td class="outcome-error">\${esc(r.error_class || '')}</td>
           </tr>
         \`).join('')}
       </tbody>
@@ -500,7 +512,8 @@ export default {
     const p = url.pathname;
     const method = req.method;
 
-    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+    // No CORS preflight needed — same-origin only.
+    if (method === 'OPTIONS') return new Response(null, { status: 405 });
 
     // ─── Landing / dashboard ─────────────────────────────────
     if (p === '/' && method === 'GET') {

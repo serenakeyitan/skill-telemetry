@@ -110,6 +110,20 @@ if [ -z "$ACCESS_TOKEN" ]; then
 fi
 [ -z "$ACCESS_TOKEN" ] && { echo "FATAL: no SUPABASE_ACCESS_TOKEN. Run 'supabase login' or export the env var."; exit 1; }
 
+# ─── Validate inputs before building SQL (F8 from audit) ──────
+# TZ_NAME and SKILL_FILTER end up interpolated into SQL strings.
+# Whitelist their character sets to prevent injection if either ever
+# came from an attacker-controlled source (e.g. a weird /etc/localtime
+# symlink, or a typo'd --skill flag).
+if ! echo "$TZ_NAME" | grep -qE '^[A-Za-z0-9_/+-]+$'; then
+  echo "FATAL: TZ '$TZ_NAME' contains unsafe characters." >&2
+  exit 2
+fi
+if [ -n "$SKILL_FILTER" ] && ! echo "$SKILL_FILTER" | grep -qE '^[A-Za-z0-9_-]+$'; then
+  echo "FATAL: --skill '$SKILL_FILTER' contains unsafe characters (allowed: A-Za-z0-9_-)" >&2
+  exit 2
+fi
+
 # ─── Build SQL based on mode ──────────────────────────────────
 WHERE_PARTS=()
 [ -n "$SKILL_FILTER" ] && WHERE_PARTS+=("skill = '$SKILL_FILTER'")

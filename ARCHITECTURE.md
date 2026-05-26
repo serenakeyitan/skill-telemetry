@@ -126,34 +126,53 @@ identifying users.
 
 ```
 skill-telemetry/
-├── README.md                            # how to integrate (creator-facing)
+├── README.md                            # creator-facing setup + adoption guide
 ├── LICENSE                              # MIT
 ├── ARCHITECTURE.md                      # this file
 ├── PRIVACY.md                           # text the creator should reproduce
+├── VERSION                              # single source of truth, root only
+├── SKILL.md.snippet                     # appended to host skill's SKILL.md
 ├── bin/
-│   ├── telemetry-log                    # called by skill at end of run
-│   └── telemetry-sync                   # background pusher
+│   ├── telemetry-log                    # write a JSONL event + background sync
+│   ├── telemetry-sync                   # cursor-based push to Supabase
+│   ├── telemetry-update-check           # check upstream release (cached 24h)
+│   ├── telemetry-upgrade-decide         # persist user's upgrade-mode choice
+│   ├── telemetry-hook                   # opt-in Stop hook (skill-name filtered)
+│   ├── telemetry-hook-install           # safe settings.json modifier
+│   ├── telemetry-hook-uninstall         # inverse of install
+│   ├── skill-events                     # local-tz dashboard CLI
+│   └── skill-telemetry-update           # sync new bins into installed skills
+├── dashboard/
+│   ├── worker.js                        # Cloudflare Worker dashboard (GH auth)
+│   ├── wrangler.toml.template           # config template; user creates wrangler.toml
+│   └── README.md                        # dashboard-specific setup
 ├── supabase/
-│   ├── schema.sql                       # run in your Supabase SQL editor
-│   ├── config.sh.example                # copy to config.sh, fill in
+│   ├── schema.sql                       # tables + views + tz function
+│   ├── dashboard.sql                    # 12 ready-to-paste analysis queries
+│   ├── config.sh.example                # template (real config.sh is gitignored)
 │   └── functions/
 │       └── skill-telemetry-ingest/
-│           └── index.ts                 # deno edge function
-└── SKILL.md.snippet                     # paste into your SKILL.md tail
+│           └── index.ts                 # Deno edge function (defense-in-depth sanitize)
+└── skills/
+    └── add-telemetry/
+        └── SKILL.md                     # meta-skill: install telemetry into a skill
 ```
 
 ## What changes between this template and the gstack reference
 
-Gstack inspired this design but the use case differs:
+Gstack inspired the cursor-sync pattern, `.pending` self-healing marker,
+and "treat skill file as executable instructions" framing. Use case differs:
 
 | Aspect | Gstack | skill-telemetry |
 |---|---|---|
 | Scope | One project's skills | One skill at a time |
 | Authentication | Public anon key + RLS + edge fn | Same |
-| Tier model | 4 tier (off/anon/community/full) | 1 tier (on/off) |
-| Identification | `installation_id` + tier-stripping | `installation_id`, always sent |
-| Skill detection | Skills self-report via CLI args | Same |
-| Hook usage | None (skills call directly) | Same |
+| Tier model | 4 tier (off/anon/community/full) | 3 tier (on / anonymous / off) — UI exposes only on/off; anonymous is honored when set manually |
+| Identification | `installation_id` + tier-stripping | `installation_id`, optionally stripped in anonymous mode |
+| Skill detection | Skills self-report via CLI args | Same, plus opt-in Stop hook for proactive skills that skip the self-report |
+| Hook usage | None | Opt-in `bin/telemetry-hook` (skill-name filtered, transcript-text minimization) |
+| Multi-skill author pool | Yes (one suite, one pool) | Yes (meta-skill detects existing author config and reuses it) |
 
-So if you've read the gstack telemetry code, this will feel familiar but
-shorter.
+So if you've read the gstack telemetry code, this will feel familiar.
+The hook and the Cloudflare dashboard are the two things gstack doesn't
+have — they're what made proactive-skill telemetry actually work.
