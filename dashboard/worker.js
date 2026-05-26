@@ -459,7 +459,7 @@ function dashboardHtml(owner) {
   </div>
   <div class="header-right">
     <span id="updated-at"></span>
-    <button class="logout" onclick="logout()">Sign out</button>
+    <button class="logout" id="logout-btn" onclick="logout()">Sign out</button>
   </div>
 </header>
 
@@ -526,12 +526,18 @@ function esc(s) {
   }[c]));
 }
 
+// Demo mode flag — preserved across all API calls so the rest of the
+// dashboard talks to the synthetic data path. Set when the page is
+// loaded with ?demo=1.
+const IS_DEMO = new URLSearchParams(location.search).get('demo') === '1';
+
 async function fetchData(endpoint) {
   const skill = document.getElementById('filter-skill').value;
-  const window = document.getElementById('filter-window').value;
+  const win = document.getElementById('filter-window').value;
   const params = new URLSearchParams();
   if (skill) params.set('skill', skill);
-  if (window) params.set('window_days', window);
+  if (win) params.set('window_days', win);
+  if (IS_DEMO) params.set('demo', '1');
   const r = await fetch(\`/api/\${endpoint}?\${params}\`);
   if (!r.ok) {
     if (r.status === 401) { window.location.href = '/'; return null; }
@@ -747,10 +753,107 @@ async function logout() {
   window.location.href = '/';
 }
 
+// In demo mode hide the sign-out button (no real session to end).
+if (IS_DEMO) {
+  const btn = document.getElementById('logout-btn');
+  if (btn) btn.style.display = 'none';
+}
+
 loadAll();
-setInterval(loadAll, 60000);  // refresh every 60s
+if (!IS_DEMO) setInterval(loadAll, 60000);  // refresh every 60s (skip in demo)
 </script>
 </body></html>`;
+}
+
+// ─── Demo data generator ─────────────────────────────────────
+// Used by `?demo=1` to populate the dashboard with a believable rising
+// curve for the screenshot we use in launch comms. Generates 30 days of
+// first-tree sessions on a 50 → ~9k exponential ramp with realistic
+// daily noise, weekend dips, and a few error/abandoned outcomes.
+function demoData(kind) {
+  const today = new Date(); today.setUTCHours(0, 0, 0, 0);
+  const days = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(today); d.setUTCDate(d.getUTCDate() - i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  // Exponential ramp 50 -> ~9000 over 30 days with sin-wave weekend dip
+  const dauSeries = days.map((day, i) => {
+    const base = 50 * Math.pow(9000 / 50, i / 29);
+    // Day-of-week dip (weekends lower)
+    const dow = new Date(day + 'T00:00:00Z').getUTCDay();
+    const dipFactor = (dow === 0 || dow === 6) ? 0.72 : 1.0;
+    // Deterministic pseudo-noise so the screenshot is reproducible
+    const noise = 0.85 + 0.30 * Math.abs(Math.sin(i * 1.7 + 2.3));
+    const sessions = Math.round(base * dipFactor * noise);
+    const events = Math.round(sessions * (1.6 + 0.2 * Math.sin(i)));
+    const dau = Math.round(sessions * (0.55 + 0.08 * Math.cos(i)));
+    return { day, skill: 'first-tree', dau, sessions, events };
+  });
+
+  if (kind === 'dau') return dauSeries;
+
+  if (kind === 'summary') {
+    const totalEvents = dauSeries.reduce((s, r) => s + r.events, 0);
+    const totalSessions = dauSeries.reduce((s, r) => s + r.sessions, 0);
+    const maxDau = Math.max(...dauSeries.map(r => r.dau));
+    const successes = Math.round(totalEvents * 0.946);
+    const errors = Math.round(totalEvents * 0.038);
+    const abandoned = totalEvents - successes - errors;
+    return [{
+      skill: 'first-tree',
+      total_events: totalEvents,
+      users: maxDau,
+      sessions: totalSessions,
+      successes,
+      errors,
+      abandoned,
+      success_rate_pct: 94.6,
+      avg_duration_s: 47,
+      last_seen: new Date().toISOString(),
+    }];
+  }
+
+  if (kind === 'steps') {
+    return [
+      { skill: 'first-tree', step: 'plan',     runs: 4821, ok: 4720, err:  62, bail:  39, success_pct: 97.9 },
+      { skill: 'first-tree', step: 'design',   runs: 4602, ok: 4391, err: 142, bail:  69, success_pct: 95.4 },
+      { skill: 'first-tree', step: 'generate', runs: 4485, ok: 4203, err: 217, bail:  65, success_pct: 93.7 },
+      { skill: 'first-tree', step: 'review',   runs: 4192, ok: 4051, err:  88, bail:  53, success_pct: 96.6 },
+      { skill: 'first-tree', step: 'publish',  runs: 3987, ok: 3812, err: 124, bail:  51, success_pct: 95.6 },
+      { skill: 'first-tree', step: 'lint',     runs: 3756, ok: 3690, err:  41, bail:  25, success_pct: 98.2 },
+    ];
+  }
+
+  if (kind === 'events') {
+    const steps = ['publish', 'review', 'generate', 'design', 'plan', 'lint'];
+    const errClasses = ['cloudflare_timeout', 'supabase_429', 'git_push_rejected', 'lint_failed'];
+    const out = [];
+    const now = new Date();
+    for (let i = 0; i < 50; i++) {
+      const ts = new Date(now.getTime() - i * 1000 * (45 + Math.floor(Math.abs(Math.sin(i*1.7))*180)));
+      // Mostly success with a small fraction of errors / abandoned
+      const seed = Math.abs(Math.sin(i * 2.7)) * 100;
+      let outcome = 'success', err = null;
+      if (seed > 96) { outcome = 'error'; err = errClasses[i % errClasses.length]; }
+      else if (seed > 92) outcome = 'abandoned';
+      const step = steps[i % steps.length];
+      const dur = Math.round(20 + Math.abs(Math.cos(i * 1.3)) * 140);
+      out.push({
+        t: ts.toISOString().slice(0, 19).replace('T', ' '),
+        skill: 'first-tree',
+        event_type: 'skill_run',
+        outcome,
+        step,
+        duration_s: dur,
+        error_class: err,
+      });
+    }
+    return out;
+  }
+
+  return [];
 }
 
 // ─── Worker entrypoint ────────────────────────────────────────
@@ -759,12 +862,19 @@ export default {
     const url = new URL(req.url);
     const p = url.pathname;
     const method = req.method;
+    const isDemo = url.searchParams.get('demo') === '1';
 
     // No CORS preflight needed — same-origin only.
     if (method === 'OPTIONS') return new Response(null, { status: 405 });
 
     // ─── Landing / dashboard ─────────────────────────────────
     if (p === '/' && method === 'GET') {
+      // Demo mode: render the dashboard unauthenticated with a fake
+      // owner slug. Used for launch screenshots; no Supabase data is
+      // touched (the API endpoints below short-circuit on ?demo=1).
+      if (isDemo) {
+        return html(dashboardHtml('first-tree'));
+      }
       const s = await getSession(env, req);
       if (isOwner(env, s)) {
         return html(dashboardHtml(s.login));
@@ -862,6 +972,13 @@ export default {
     // All return 401 if not signed in as owner
     const dataEndpoints = ['/api/summary', '/api/dau', '/api/steps', '/api/events'];
     if (dataEndpoints.includes(p) && method === 'GET') {
+      // Demo mode short-circuit. Returns synthetic data without
+      // touching Supabase or requiring a session. Only `?demo=1`
+      // triggers this; real data still requires owner sign-in.
+      if (isDemo) {
+        const kind = p.replace('/api/', '');
+        return json(demoData(kind));
+      }
       const s = await getSession(env, req);
       if (!isOwner(env, s)) return json({ error: 'unauthorized' }, { status: 401 });
 
