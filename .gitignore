@@ -15,3 +15,7 @@ supabase/.temp/
 
 # Per-skill Supabase configs (each fork has its own; never commit)
 **/supabase/config.sh
+
+# Cloudflare Worker per-deployment config (filled wrangler.toml has account IDs)
+dashboard/wrangler.toml
+dashboard/.wrangler/
