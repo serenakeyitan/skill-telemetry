@@ -130,6 +130,69 @@ one env var to flip it off, and don't bury the disclosure.
 
 ---
 
+## Where the telemetry call lives — SKILL.md vs Stop hook
+
+You can fire telemetry from two places. Both ship with this template.
+You pick based on your skill's invocation pattern.
+
+**SKILL.md call (default)** — a bash block inside the skill's own
+`SKILL.md` calls `bin/telemetry-log`. Claude executes it as part of
+running the skill.
+
+**Stop hook (`telemetry-hook-install --skill <name>`)** — registers a
+filtered Claude Code Stop hook that fires when a session ends. The hook
+reads the transcript looking for Skill tool calls of your specific
+skill, and only emits telemetry if your skill was actually used.
+
+### What we found dogfooding
+
+We ran both for ~3 weeks across `tdoc` and `add-telemetry`. Here's the
+honest scorecard:
+
+| | **SKILL.md call** | **Stop hook** |
+|---|---|---|
+| Setup | Nothing extra — already in the template | One command: `telemetry-hook-install --skill <name>` |
+| Privacy surface | Tiny — just the bash block in your SKILL.md | Reads `~/.claude/settings.json` + the transcript file (skill names only, no message text) |
+| Fires when user runs `/your-skill` explicitly | ✅ always | ✅ always |
+| Fires when Claude auto-invokes the skill | ⚠️ **often misses** — model skips the telemetry block | ✅ always |
+| Fires when user abandons mid-run (Ctrl+C) | ❌ no | ✅ yes (heuristic) |
+| Captures duration accurately | ✅ via per-session sentinel | ✅ via transcript timestamps + sentinel fallback |
+| Distinguishes success / error / abandoned | ✅ skill decides what to report | ⚠️ heuristic based on transcript tail |
+| Works when SKILL_TELEMETRY=off | ✅ respects | ✅ respects (same env var) |
+| Affects users who didn't opt in | Never | Never — hook is filtered to one named skill, ignores all others |
+
+### When to pick which
+
+**Use the SKILL.md call** if your skill is **explicit** — users type
+`/your-skill` and Claude runs your steps in order. Documentation-style,
+build-style, deploy-style skills. The bash block executes reliably as
+part of normal skill flow, and you get to decide step-level outcomes.
+
+**Add the Stop hook on top** if your skill is **proactive** — it
+auto-invokes based on intent (tdoc fires when the user says "draft a
+doc", `office-hours` fires on product questions). Claude tends to skip
+the SKILL.md telemetry block here because it's racing toward the user's
+real ask. The hook backstops that.
+
+**Why not just always use the hook?** Two reasons:
+
+1. **Step granularity.** The SKILL.md call lets you fire one event per
+   sub-step (`plan` succeeded, `publish` failed). The hook only knows
+   "the session ended" — coarser.
+2. **Outcome accuracy.** Your SKILL.md knows whether the publish step
+   really succeeded; the hook is guessing from the last few transcript
+   lines. So we keep SKILL.md as the source of truth and treat hook
+   events as a backstop. The sync pipeline tags them with `source =
+   "live"` vs `source = "hook"` so you can see the difference in
+   your dashboard.
+
+**Bottom line:** start with the SKILL.md call. Add the hook only if
+you're shipping a proactive skill and notice telemetry events are
+sparser than your install count would suggest. They compose cleanly
+— our pipeline dedupes per-session so you don't double-count.
+
+---
+
 ## Install
 
 There are two paths. **Use the meta-skill** if you can — it's one prompt
