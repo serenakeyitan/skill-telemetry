@@ -103,14 +103,24 @@ BAK="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
 cp "$SETTINGS" "$BAK"
 echo "Backed up existing settings to: $BAK"
 
-# Idempotency: check if a marker for this skill already exists; remove it first
+# Idempotency: remove ANY existing entry pointing at this skill.
+# Two cases:
+#   1. Marker matches our x-marker convention → remove
+#   2. Legacy entry (no x-marker) but command embeds SKILL_TELEMETRY_HOOK_SKILL=<skill> → remove
+# Case 2 covers entries installed before x-marker was added: an upgrade
+# path on the same machine would otherwise leave duplicates and silently
+# orphan the legacy entry (uninstall can't find it).
 MARKER="skill-telemetry:$SKILL"
+CMD_NEEDLE="SKILL_TELEMETRY_HOOK_SKILL=$SKILL"
 TMP="$(mktemp)"
-jq --arg marker "$MARKER" '
+jq --arg marker "$MARKER" --arg needle "$CMD_NEEDLE" '
   .hooks //= {}
   | .hooks.Stop //= []
   | .hooks.Stop |= map(select(
-      (.hooks // []) | all(.["x-marker"] != $marker)
+      (.hooks // []) | all(
+        (.["x-marker"] != $marker)
+        and ((.command // "") | contains($needle) | not)
+      )
     ))
 ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
 

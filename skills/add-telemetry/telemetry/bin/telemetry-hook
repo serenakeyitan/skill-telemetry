@@ -77,27 +77,54 @@ INVOKED_SKILLS=$(grep -o '"name":"Skill"[^}]*"skill":"[^"]*"' "$TRANSCRIPT" 2>/d
 echo "$INVOKED_SKILLS" | grep -qx "$TARGET_SKILL" || exit 0
 
 # ─── Outcome heuristic — NO transcript text captured ────────
-# F3 fix: previously we extracted the last `"text":"..."` snippet from
-# the transcript tail and shipped it as error_message. That violated
-# the project's "no prompts / no replies" privacy claim, because the
-# transcript tail often contains Claude's reply. We now emit ONLY a
-# low-cardinality class tag — no message body — so the privacy promise
-# in PRIVACY.md and README is honest.
-LAST_TAIL="$(tail -5 "$TRANSCRIPT" 2>/dev/null || true)"
-# CODEX-C1 fix: telemetry-log validates --outcome against the set
-# {success,error,abandoned,unknown}. The previous default "completed"
-# silently rewrote to "unknown" — so every hook-captured run that
-# *did* succeed was misclassified. Use "success" so the heuristic
-# below stays the source of truth.
+# Outcome heuristic — structural, not regex-on-text.
+#
+# Bug history (dogfood, June 2026): the previous heuristic was
+#   tail -5 | grep 'interrupted|abort'  → OUTCOME=abandoned
+#   tail -5 | grep '"is_error":true'    → OUTCOME=error
+# That fired on:
+#   - Any conversation discussing "abandoned"/"interrupted" (e.g. THIS
+#     codebase's own README, debugging logs, error-handling code)
+#   - Every Bash tool_result with a non-zero exit (`is_error:true`),
+#     even when the session itself succeeded
+# Result: 40% false-abandon rate, ~half the recorded errors were spurious.
+#
+# Correct signal lives in structured fields, not free text:
+#   - assistant message `stop_reason: "interrupted"` → user pressed ESC
+#   - tool_result content like "Tool use was rejected by the user"
+#     OR the literal "[Request interrupted by user]" → explicit deny
+#
+# F3 privacy fix still holds: we only emit a low-cardinality class tag,
+# never the raw message text.
 OUTCOME="success"
 ERROR_CLASS=""
 
-if echo "$LAST_TAIL" | grep -qi '"is_error":true\|"type":"error"'; then
-  OUTCOME="error"
-  ERROR_CLASS="hook_detected_error"
-elif echo "$LAST_TAIL" | grep -qi 'interrupted\|abort'; then
-  OUTCOME="abandoned"
+# Read just the tail (last 20 JSONL lines covers the final exchange
+# without scanning multi-MB transcripts).
+LAST_TAIL="$(tail -20 "$TRANSCRIPT" 2>/dev/null || true)"
+
+if [ -n "$LAST_TAIL" ] && command -v jq >/dev/null 2>&1; then
+  # 1) Did the FINAL assistant turn end with stop_reason=interrupted?
+  #    That's Claude Code's signal for "user pressed ESC mid-stream".
+  LAST_STOP_REASON=$(printf '%s\n' "$LAST_TAIL" \
+    | jq -rs 'map(select(.type == "assistant")) | last
+              | .message.stop_reason // empty' 2>/dev/null)
+  # 2) Did the FINAL user turn contain a literal "[Request interrupted by user]"
+  #    marker? That's what Claude Code writes when the user denies a tool
+  #    call or cancels in the middle of a tool execution.
+  LAST_USER_HAS_INTERRUPT=$(printf '%s\n' "$LAST_TAIL" \
+    | jq -rs 'map(select(.type == "user")) | last
+              | .message.content
+              | tostring
+              | test("Request interrupted by user|Tool use was rejected by user")' 2>/dev/null)
+
+  if [ "$LAST_STOP_REASON" = "interrupted" ] || [ "$LAST_USER_HAS_INTERRUPT" = "true" ]; then
+    OUTCOME="abandoned"
+  fi
 fi
+# No fallback `grep` branch — false positives are worse than false negatives
+# here. If jq is missing the user's environment is unusual; we'd rather
+# undercount abandons than mislabel half the corpus.
 
 # ─── Duration computation ───────────────────────────────────
 # Two strategies in priority order:

@@ -36,9 +36,17 @@ if [ ! -f "$SETTINGS" ]; then
   exit 0
 fi
 
-MATCHES=$(jq --arg marker "$MARKER" '
+CMD_NEEDLE="SKILL_TELEMETRY_HOOK_SKILL=$SKILL"
+# Match by x-marker (current install) OR by legacy command string
+# (entries installed before x-marker convention existed). Without the
+# legacy branch, uninstall silently no-ops on real orphaned entries —
+# bug found in pre-launch dogfood, June 2026.
+MATCHES=$(jq --arg marker "$MARKER" --arg needle "$CMD_NEEDLE" '
   [(.hooks.Stop // [])[]
-    | select((.hooks // []) | any(.["x-marker"] == $marker))]
+    | select((.hooks // []) | any(
+        (.["x-marker"] == $marker)
+        or ((.command // "") | contains($needle))
+      ))]
   | length
 ' "$SETTINGS")
 
@@ -59,11 +67,14 @@ cp "$SETTINGS" "$BAK"
 echo "Backed up existing settings to: $BAK"
 
 TMP="$(mktemp)"
-jq --arg marker "$MARKER" '
+jq --arg marker "$MARKER" --arg needle "$CMD_NEEDLE" '
   .hooks //= {}
   | .hooks.Stop //= []
   | .hooks.Stop |= map(select(
-      (.hooks // []) | all(.["x-marker"] != $marker)
+      (.hooks // []) | all(
+        (.["x-marker"] != $marker)
+        and ((.command // "") | contains($needle) | not)
+      )
     ))
 ' "$SETTINGS" > "$TMP" && mv "$TMP" "$SETTINGS"
 

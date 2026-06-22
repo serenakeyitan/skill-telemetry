@@ -130,7 +130,66 @@ else
   fail "--source hook persists in JSONL"
 fi
 
-# ── 11. Local dashboard demo mode boots + DNS rebinding defense ──
+# ── 11. Hook install/uninstall handles legacy entries (no x-marker) ──
+# Regression test: a settings.json containing a pre-x-marker hook
+# entry must be discoverable by uninstall (otherwise the entry orphans).
+# Note: capture output to a file, then grep — piping into `grep -q`
+# closes stdin and kills the upstream script via SIGPIPE/pipefail before
+# the mutation completes. Found this the hard way writing this test.
+LEGACY_SETTINGS="$(mktemp)"
+LEGACY_OUTPUT="$(mktemp)"
+cat > "$LEGACY_SETTINGS" <<'EOF'
+{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"SKILL_TELEMETRY_HOOK_SKILL=legacyskill SKILL_TELEMETRY_HOOK_BIN='x' 'y'","timeout":10}]}]}}
+EOF
+CLAUDE_SETTINGS="$LEGACY_SETTINGS" telemetry-hook-uninstall --skill legacyskill > "$LEGACY_OUTPUT" 2>&1
+if grep -q "Found 1 hook" "$LEGACY_OUTPUT"; then
+  ok "uninstall finds legacy entry without x-marker"
+else
+  fail "uninstall finds legacy entry without x-marker"
+fi
+# After uninstall, the entry should be gone
+if [ "$(jq '.hooks.Stop | length' "$LEGACY_SETTINGS")" = "0" ]; then
+  ok "uninstall removes legacy entry"
+else
+  fail "uninstall removes legacy entry"
+fi
+rm -f "$LEGACY_SETTINGS" "$LEGACY_OUTPUT"
+
+# ── 12. Abandoned heuristic no longer false-fires on free text ──
+# Regression test: a transcript whose assistant message *mentions* the
+# word "interrupted" or "abandoned" (e.g. when discussing this very
+# heuristic) should NOT be tagged abandoned. Only structural signals
+# count: stop_reason=interrupted, or last user msg has the literal
+# "Request interrupted by user" / "Tool use was rejected by user".
+FAKE_TRANSCRIPT="$(mktemp)"
+cat > "$FAKE_TRANSCRIPT" <<'EOF'
+{"type":"user","message":{"role":"user","content":"explain abandoned heuristic"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"the old code grepped for interrupted and abort"}],"stop_reason":"end_turn"}}
+EOF
+LAST_TAIL="$(tail -20 "$FAKE_TRANSCRIPT")"
+SR=$(printf '%s\n' "$LAST_TAIL" | jq -rs 'map(select(.type == "assistant")) | last | .message.stop_reason // empty')
+UI=$(printf '%s\n' "$LAST_TAIL" | jq -rs 'map(select(.type == "user")) | last | .message.content | tostring | test("Request interrupted by user|Tool use was rejected by user")')
+if [ "$SR" != "interrupted" ] && [ "$UI" != "true" ]; then
+  ok "abandoned heuristic ignores discussion-of-the-word text"
+else
+  fail "abandoned heuristic ignores discussion-of-the-word text (got SR='$SR' UI='$UI')"
+fi
+
+# Positive case: real interrupted assistant turn IS detected
+cat > "$FAKE_TRANSCRIPT" <<'EOF'
+{"type":"user","message":{"role":"user","content":"do thing"}}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"interrupted"}}
+EOF
+LAST_TAIL="$(tail -20 "$FAKE_TRANSCRIPT")"
+SR=$(printf '%s\n' "$LAST_TAIL" | jq -rs 'map(select(.type == "assistant")) | last | .message.stop_reason // empty')
+if [ "$SR" = "interrupted" ]; then
+  ok "abandoned heuristic still detects real stop_reason=interrupted"
+else
+  fail "abandoned heuristic still detects real stop_reason=interrupted (got '$SR')"
+fi
+rm -f "$FAKE_TRANSCRIPT"
+
+# ── 13. Local dashboard demo mode boots + DNS rebinding defense ──
 # Only run if node + jq are around (CI has both; some local envs may not).
 if command -v node >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
   cd "$ROOT/dashboard"
